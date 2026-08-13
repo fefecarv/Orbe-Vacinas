@@ -22,7 +22,10 @@
       fields: [
         ['name', 'Nome da vacina', 'text'],
         ['manufacturer', 'Fabricante', 'text'],
+        ['description', 'Descrição', 'text'],
+        ['category', 'Categoria', 'text'],
         ['age', 'Indicação', 'text'],
+        ['doses', 'Esquema de doses', 'text'],
         ['price', 'Valor-base', 'text'],
         ['status', 'Situação', 'status'],
       ],
@@ -32,9 +35,9 @@
       fields: [
         ['number', 'Número do lote', 'text'],
         ['vaccine', 'Vacina', 'text'],
-        ['manufacturer', 'Fabricante', 'text'],
         ['expires', 'Validade', 'text'],
         ['quantity', 'Quantidade', 'text'],
+        ['supplier', 'Fornecedor', 'text'],
         ['status', 'Situação', 'batchStatus'],
       ],
     },
@@ -44,7 +47,9 @@
         ['company', 'Convênio', 'text'],
         ['plan', 'Plano', 'text'],
         ['code', 'Código operacional', 'text'],
-        ['validUntil', 'Validade', 'text'],
+        ['coverageType', 'Tipo de cobertura', 'coverageType'],
+        ['discount', 'Percentual de desconto', 'optional'],
+        ['copay', 'Valor da coparticipação', 'optional'],
         ['status', 'Situação', 'status'],
       ],
     },
@@ -67,9 +72,9 @@
   function submit(event: SubmitEvent) {
     event.preventDefault();
     const required = isUser
-      ? ['name', 'cpf', 'email', 'phone', 'role', 'status']
+      ? ['name', 'cpf', 'email', 'phone', 'birth', 'role', 'status', ...(editing ? [] : ['password'])]
       : configs[entity as Exclude<Entity, 'user'>].fields
-          .filter((field) => field[0] !== 'status')
+          .filter((field) => !['status', 'discount', 'copay'].includes(field[0]))
           .map((field) => field[0]);
     if (required.some((field) => !values[field]?.trim())) {
       error = 'Preencha todos os campos obrigatórios.';
@@ -137,6 +142,7 @@
               oninput={(v) => (values.phone = v)}
               required
             />
+            <FormField id="user-birth" label="Data de nascimento" type="date" value={values.birth ?? ''} oninput={(v)=>(values.birth=v)} required />
           </div>
         </section>
 
@@ -237,13 +243,15 @@
                   ></select
                 ></label
               >
+            {:else if field[2] === 'coverageType'}
+              <label>{field[1]}<select value={values[field[0]] ?? 'ANALISE_MANUAL'} onchange={(e) => (values[field[0]] = e.currentTarget.value)}><option value="INTEGRAL">Cobertura integral</option><option value="PERCENTUAL">Desconto percentual</option><option value="COPARTICIPACAO">Coparticipação fixa</option><option value="SEM_COBERTURA">Sem cobertura</option><option value="ANALISE_MANUAL">Análise manual</option></select></label>
             {:else}
               <FormField
                 id={`crud-${field[0]}`}
                 label={field[1]}
                 value={values[field[0]] ?? ''}
                 oninput={(v) => (values[field[0]] = v)}
-                required
+                required={field[2] !== 'optional'}
               />
             {/if}
           {/each}

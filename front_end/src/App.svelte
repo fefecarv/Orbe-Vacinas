@@ -17,8 +17,10 @@
   import SecurityHelpPage from './features/shared/SecurityHelpPage.svelte';
   import ConfirmDialog from './design-system/components/ConfirmDialog.svelte';
   import { isKnownPage, pageFromPath, pagePaths, pathAllowedForRole, roleFromPath, type UserRole } from './lib/navigation';
+  import { authApi, roleFromUser } from './lib/api';
   let activePage = $state(pageFromPath(location.pathname));
-  let authenticated = $state(!!localStorage.getItem('orbe-session-role'));
+  let authenticated = $state(false);
+  let authChecking = $state(true);
   let authPage = $state<'login' | 'register' | 'forgot'>(location.pathname === '/cadastro' ? 'register' : location.pathname === '/recuperar-senha' ? 'forgot' : 'login');
   let bookingVaccine = $state('');
   let role = $state<UserRole>((localStorage.getItem('orbe-session-role') as UserRole | null) ?? roleFromPath(location.pathname));
@@ -44,7 +46,8 @@
     navigate(selectedRole === 'admin' ? 'admin-dashboard' : selectedRole === 'employee' ? 'staff-dashboard' : 'home', true);
   }
 
-  function logout() {
+  async function logout() {
+    await authApi.logout().catch(() => undefined);
     authenticated = false;
     role = 'patient';
     activePage = 'home';
@@ -63,18 +66,37 @@
   }
 
   onMount(() => {
-    if (authenticated && !pathAllowedForRole(location.pathname, role)) activePage = 'access-denied';
-    if (!authenticated && !['/login', '/cadastro', '/recuperar-senha'].includes(location.pathname)) history.replaceState({}, '', '/login');
     const handlePopState = () => {
       if (authenticated) activePage = pathAllowedForRole(location.pathname, role) ? pageFromPath(location.pathname) : 'access-denied';
       else authPage = location.pathname === '/cadastro' ? 'register' : location.pathname === '/recuperar-senha' ? 'forgot' : 'login';
     };
     addEventListener('popstate', handlePopState);
+    void (async () => {
+      try {
+        const user = await authApi.current();
+        role = roleFromUser(user);
+        authenticated = true;
+        localStorage.setItem('orbe-session-role', role);
+        activePage = pathAllowedForRole(location.pathname, role)
+          ? pageFromPath(location.pathname)
+          : 'access-denied';
+      } catch {
+        authenticated = false;
+        localStorage.removeItem('orbe-session-role');
+        if (!['/login', '/cadastro', '/recuperar-senha'].includes(location.pathname)) {
+          history.replaceState({}, '', '/login');
+        }
+      } finally {
+        authChecking = false;
+      }
+    })();
     return () => removeEventListener('popstate', handlePopState);
   });
 </script>
 
-{#if authenticated}
+{#if authChecking}
+  <div class="session-loading" role="status">Carregando...</div>
+{:else if authenticated}
   <AppShell {activePage} {role} onNavigate={navigate} onLogout={logout} onReset={() => resetDialog = true}>
     {#if activePage === 'home'}<PatientDashboard onNavigate={navigate} />
     {:else if activePage === 'appointments'}<AppointmentsPage onSchedule={() => { bookingVaccine = ''; navigate('booking'); }} />
@@ -113,3 +135,14 @@
     {/if}
   </AuthLayout>
 {/if}
+
+<style>
+  .session-loading {
+    display: grid;
+    min-height: 100dvh;
+    place-items: center;
+    background: var(--surface-page);
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+  }
+</style>

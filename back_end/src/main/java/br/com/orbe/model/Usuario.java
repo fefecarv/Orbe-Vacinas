@@ -1,6 +1,7 @@
 package br.com.orbe.model;
 
 import br.com.orbe.model.enums.StatusUsuario;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -41,6 +42,7 @@ public class Usuario {
     public void setCpf(String cpf) { this.cpf = cpf; }
     public String getEmail() { return email; }
     public void setEmail(String email) { this.email = email; }
+    @JsonIgnore
     public String getSenhaHash() { return senhaHash; }
     public void setSenhaHash(String senhaHash) { this.senhaHash = senhaHash; }
     public String getTelefone() { return telefone; }
@@ -69,6 +71,7 @@ public class Usuario {
     public void setUltimoAcessoEm(LocalDateTime ultimoAcessoEm) { this.ultimoAcessoEm = ultimoAcessoEm; }
     public String getUltimoIp() { return ultimoIp; }
     public void setUltimoIp(String ultimoIp) { this.ultimoIp = ultimoIp; }
+    @JsonIgnore
     public String getTokenRecuperacaoHash() { return tokenRecuperacaoHash; }
     public void setTokenRecuperacaoHash(String tokenRecuperacaoHash) { this.tokenRecuperacaoHash = tokenRecuperacaoHash; }
     public LocalDateTime getTokenRecuperacaoExpiraEm() { return tokenRecuperacaoExpiraEm; }

@@ -1,0 +1,6 @@
+package br.com.orbe.dto;
+import br.com.orbe.model.enums.*;import java.time.*;
+public class UsuarioAdministrativoItem {
+ private Long id;private String nome;private String cpf;private String email;private String telefone;private LocalDate dataNascimento;private StatusUsuario status;private PerfilUsuario perfil;private String matricula;private LocalDateTime ultimoAcessoEm;
+ public Long getId(){return id;}public void setId(Long v){id=v;}public String getNome(){return nome;}public void setNome(String v){nome=v;}public String getCpf(){return cpf;}public void setCpf(String v){cpf=v;}public String getEmail(){return email;}public void setEmail(String v){email=v;}public String getTelefone(){return telefone;}public void setTelefone(String v){telefone=v;}public LocalDate getDataNascimento(){return dataNascimento;}public void setDataNascimento(LocalDate v){dataNascimento=v;}public StatusUsuario getStatus(){return status;}public void setStatus(StatusUsuario v){status=v;}public PerfilUsuario getPerfil(){return perfil;}public void setPerfil(PerfilUsuario v){perfil=v;}public String getMatricula(){return matricula;}public void setMatricula(String v){matricula=v;}public LocalDateTime getUltimoAcessoEm(){return ultimoAcessoEm;}public void setUltimoAcessoEm(LocalDateTime v){ultimoAcessoEm=v;}
+}

@@ -2,16 +2,17 @@
   import Alert from '../../design-system/components/Alert.svelte';
   import Button from '../../design-system/components/Button.svelte';
   import FormField from '../../design-system/components/FormField.svelte';
+  import { authApi, roleFromUser } from '../../lib/api';
   let {
     onLogin,
     onNavigate,
   }: { onLogin: (role: 'patient' | 'employee' | 'admin') => void; onNavigate: (page: 'register' | 'forgot') => void } =
     $props();
-  let email = $state('mariana@exemplo.com');
-  let password = $state('12345678');
+  let email = $state('');
+  let password = $state('');
   let error = $state('');
   let loading = $state(false);
-  function submit(event: SubmitEvent) {
+  async function submit(event: SubmitEvent) {
     event.preventDefault();
     error = '';
     if (!email.includes('@') || password.length < 8) {
@@ -19,11 +20,14 @@
       return;
     }
     loading = true;
-    setTimeout(() => {
+    try {
+      const user = await authApi.login(email, password);
+      onLogin(roleFromUser(user));
+    } catch (exception) {
+      error = exception instanceof Error ? exception.message : 'Não foi possível entrar.';
+    } finally {
       loading = false;
-      const access = email.toLowerCase();
-      onLogin(access === 'admin@orbe.com' ? 'admin' : access === 'funcionario@orbe.com' ? 'employee' : 'patient');
-    }, 500);
+    }
   }
 </script>
 
@@ -58,8 +62,6 @@
   >
 </form>
 <p class="footer">Ainda não tem uma conta? <button onclick={() => onNavigate('register')}>Cadastre-se</button></p>
-<p class="demo">Acesso de funcionário: funcionario@orbe.com · senha 12345678</p>
-<p class="demo">Acesso administrativo: admin@orbe.com · senha 12345678</p>
 
 <style>
   .heading > p {
@@ -106,12 +108,5 @@
     color: var(--color-brand-500);
     font-weight: 750;
     cursor: pointer;
-  }
-  .demo {
-    margin-top: var(--space-4);
-    color: var(--text-tertiary);
-    font-size: var(--text-xs);
-    line-height: 1.5;
-    text-align: center;
   }
 </style>

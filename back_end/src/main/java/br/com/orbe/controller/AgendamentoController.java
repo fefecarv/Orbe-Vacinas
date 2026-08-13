@@ -2,6 +2,8 @@ package br.com.orbe.controller;
 
 import br.com.orbe.dto.ApiResponse;
 import br.com.orbe.dto.CriarAgendamentoRequest;
+import br.com.orbe.dto.AgendaDiariaItem;
+import br.com.orbe.model.enums.StatusAgendamento;
 import br.com.orbe.model.Agendamento;
 import br.com.orbe.service.AgendamentoService;
 
@@ -21,6 +23,10 @@ public final class AgendamentoController {
         return ApiResponse.criado("Agendamento criado.", service.criar(request));
     }
 
+    public Agendamento buscar(Long id) {
+        return service.buscar(id);
+    }
+
     public ApiResponse<Agendamento> cancelar(Long id, String motivo) {
         return ApiResponse.ok(service.cancelar(id, motivo));
     }
@@ -31,5 +37,17 @@ public final class AgendamentoController {
 
     public ApiResponse<List<Agendamento>> agenda(LocalDate data) {
         return ApiResponse.ok(service.listarAgenda(data));
+    }
+
+    public ApiResponse<List<Agendamento>> paciente(Long usuarioId, Long dependenteId) {
+        return ApiResponse.ok(service.listarPaciente(usuarioId, dependenteId));
+    }
+
+    public ApiResponse<List<AgendaDiariaItem>> agendaDetalhada(LocalDate data) {
+        return ApiResponse.ok(service.listarAgendaDetalhada(data));
+    }
+
+    public ApiResponse<Agendamento> atualizarStatus(Long id, StatusAgendamento status) {
+        return ApiResponse.ok(service.atualizarStatus(id, status));
     }
 }

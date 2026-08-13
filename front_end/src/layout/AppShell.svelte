@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { applyTheme, getThemePreference, type ThemePreference } from '../design-system/theme/theme';
-  import { currentPatient } from '../mocks/patient';
+  import { currentUser } from '../lib/api';
 
   let {
     children,
@@ -20,6 +20,7 @@
   } = $props();
   let menuOpen = $state(false);
   let theme = $state<ThemePreference>('system');
+  const sessionUser = currentUser();
 
   const patientNavGroups = [
     {
@@ -109,7 +110,7 @@
   <aside class:open={menuOpen}>
     <div class="brand" aria-label="Orbe"><span>or</span>be<i></i></div>
     <p class="welcome">
-      Olá, {role === 'admin' ? 'Roberto Mendes' : role === 'employee' ? 'Ana Ribeiro' : currentPatient.firstName}
+      Olá, {sessionUser?.nome.split(' ')[0] ?? 'usuário'}
     </p>
     <nav aria-label="Navegação principal">
       {#each navGroups as group}

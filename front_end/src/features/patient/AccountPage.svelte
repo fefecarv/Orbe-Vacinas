@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import Alert from '../../design-system/components/Alert.svelte';
   import Button from '../../design-system/components/Button.svelte';
   import Card from '../../design-system/components/Card.svelte';
@@ -10,6 +11,7 @@
   import PortalRecordDialog from './PortalRecordDialog.svelte';
   import { dependents as seedDependents, insurances as seedInsurances } from '../../mocks/portal';
   import { currentPatient } from '../../mocks/patient';
+  import { patientApi } from '../../lib/api';
 
   let { mode }: { mode: 'family' | 'insurance' | 'profile' } = $props();
   type Row = Record<string, string>;
@@ -36,6 +38,8 @@
   let editing = $state<Row | null>(null);
   let toast = $state('');
   let cardView = $state<Row | null>(null);
+  let loadError = $state('');
+  let acceptedInsurances = $state<Row[]>([]);
   let viewMode = $state<'grid' | 'list'>((localStorage.getItem('orbe-view-account') as 'grid' | 'list') ?? 'grid');
   const metadata = {
     family: {
@@ -58,15 +62,38 @@
   $effect(() => localStorage.setItem('orbe-portal-insurance', JSON.stringify(insurance)));
   $effect(() => localStorage.setItem('orbe-view-account', viewMode));
 
-  function saveRecord(values: Row) {
+  onMount(async () => {
+    try {
+      if (mode === 'family') {
+        const dependents = await patientApi.dependents();
+        family = dependents.map((item) => ({
+        id: String(item.id),
+        name: item.nome,
+        relationship: 'Dependente',
+        birthDate: new Date(`${item.dataNascimento}T00:00:00`).toLocaleDateString('pt-BR'),
+        cpf: 'Não informado',
+        active: String(item.status === 'ATIVO'),
+        }));
+      } else if (mode === 'insurance') {
+        const [cards, accepted] = await Promise.all([patientApi.insurances(), patientApi.acceptedInsurances()]);
+        acceptedInsurances = accepted.map((item) => ({id:String(item.id),label:`${item.nome} · ${item.plano}`}));
+        insurance = cards.map((item) => ({id:String(item.id),convenioId:String(item.convenioId),company:item.nomeConvenio,plan:item.plano,cardNumber:item.numeroCarteirinha,holder:item.titular,validUntil:item.dataValidade,active:String(item.ativo)}));
+      }
+    } catch (exception) {
+      loadError = exception instanceof Error ? exception.message : 'Não foi possível carregar os dependentes.';
+    }
+  });
+
+  async function saveRecord(values: Row) {
     if (dialog === 'dependent')
       family = family.some((item) => item.id === values.id)
         ? family.map((item) => (item.id === values.id ? values : item))
         : [values, ...family];
-    else
-      insurance = insurance.some((item) => item.id === values.id)
-        ? insurance.map((item) => (item.id === values.id ? values : item))
-        : [values, ...insurance];
+    else {
+      await patientApi.saveInsurance({id:editing?Number(values.id):undefined,convenioId:Number(values.convenioId),numeroCarteirinha:values.cardNumber,titular:values.holder,dataValidade:values.validUntil});
+      const cards=await patientApi.insurances();
+      insurance=cards.map((item)=>({id:String(item.id),convenioId:String(item.convenioId),company:item.nomeConvenio,plan:item.plano,cardNumber:item.numeroCarteirinha,holder:item.titular,validUntil:item.dataValidade,active:String(item.ativo)}));
+    }
     toast = editing ? 'Registro atualizado com sucesso.' : 'Registro cadastrado com sucesso.';
     dialog = null;
     editing = null;
@@ -90,6 +117,8 @@
         >{/if}
     {/snippet}
   </PageHeader>
+
+  {#if loadError}<Alert tone="danger">{loadError}</Alert>{/if}
 
   {#if mode === 'family'}
     <div class="collection">
@@ -214,6 +243,7 @@
 {#if dialog}<PortalRecordDialog
     type={dialog}
     initial={editing ?? {}}
+    insuranceOptions={acceptedInsurances}
     onSave={saveRecord}
     onCancel={() => {
       dialog = null;

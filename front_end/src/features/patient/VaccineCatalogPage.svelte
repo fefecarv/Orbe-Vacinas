@@ -1,21 +1,35 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import Alert from '../../design-system/components/Alert.svelte';
   import Button from '../../design-system/components/Button.svelte';
   import Card from '../../design-system/components/Card.svelte';
   import PageHeader from '../../design-system/components/PageHeader.svelte';
   import CollectionPanel from '../../design-system/components/CollectionPanel.svelte';
   import ViewModeToggle from '../../design-system/components/ViewModeToggle.svelte';
-  import { vaccines } from '../../mocks/portal';
+  import { patientApi, type ApiVaccine } from '../../lib/api';
   let { onSchedule }: { onSchedule: (id: string) => void } = $props();
   let query = $state('');
   let category = $state('Todas');
+  let vaccines = $state<ApiVaccine[]>([]);
+  let loading = $state(true);
+  let error = $state('');
   let viewMode = $state<'grid' | 'list'>((localStorage.getItem('orbe-view-vaccines') as 'grid' | 'list') ?? 'grid');
   let filtered = $derived(
     vaccines.filter(
-      (v) => (category === 'Todas' || v.category === category) && v.name.toLowerCase().includes(query.toLowerCase()),
+      (v) => (category === 'Todas' || v.categoria === category) && v.nome.toLowerCase().includes(query.toLowerCase()),
     ),
   );
-  const categories = ['Todas', ...new Set(vaccines.map((v) => v.category))];
+  let categories = $derived(['Todas', ...new Set(vaccines.map((v) => v.categoria))]);
   $effect(() => localStorage.setItem('orbe-view-vaccines', viewMode));
+  onMount(async () => {
+    try {
+      vaccines = await patientApi.vaccines();
+    } catch (exception) {
+      error = exception instanceof Error ? exception.message : 'Não foi possível carregar as vacinas.';
+    } finally {
+      loading = false;
+    }
+  });
 </script>
 
 <div class="page">
@@ -34,34 +48,36 @@
           >{#each categories as item}<option>{item}</option>{/each}</select
         >
       </div>
+      {#if error}<Alert tone="danger">{error}</Alert>{/if}
+      {#if loading}<div class="empty"><p>Carregando vacinas...</p></div>{/if}
       <div class="grid {viewMode}">
         {#each filtered as vaccine}<Card padding="none"
             ><article>
-              <div class="cover"><span>✚</span><small>{vaccine.category}</small></div>
+              <div class="cover"><span>✚</span><small>{vaccine.categoria}</small></div>
               <div class="content">
                 <div class="title">
-                  <h2>{vaccine.name}</h2>
-                  <span class:unavailable={!vaccine.available}>{vaccine.available ? 'Disponível' : 'Indisponível'}</span
+                  <h2>{vaccine.nome}</h2>
+                  <span class:unavailable={!vaccine.ativo}>{vaccine.ativo ? 'Disponível' : 'Indisponível'}</span
                   >
                 </div>
-                <p>{vaccine.description}</p>
+                <p>{vaccine.descricao}</p>
                 <dl>
                   <div>
                     <dt>Fabricante</dt>
-                    <dd>{vaccine.manufacturer}</dd>
+                    <dd>{vaccine.fabricante}</dd>
                   </div>
                   <div>
                     <dt>Indicação</dt>
-                    <dd>{vaccine.age}</dd>
+                    <dd>{vaccine.indicacao}</dd>
                   </div>
                   <div>
                     <dt>Esquema</dt>
-                    <dd>{vaccine.doses}</dd>
+                    <dd>{vaccine.esquemaDoses}</dd>
                   </div>
                 </dl>
                 <footer>
-                  <strong>{vaccine.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong
-                  ><Button size="sm" disabled={!vaccine.available} onclick={() => onSchedule(vaccine.id)}
+                  <strong>{vaccine.valorBase.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong
+                  ><Button size="sm" disabled={!vaccine.ativo} onclick={() => onSchedule(String(vaccine.id))}
                     >Agendar</Button
                   >
                 </footer>
@@ -69,7 +85,7 @@
             </article></Card
           >{/each}
       </div>
-      {#if filtered.length === 0}<div class="empty">
+      {#if !loading && filtered.length === 0}<div class="empty">
           <span>⌕</span>
           <h2>Nenhuma vacina encontrada</h2>
           <p>Tente buscar outro nome ou remover o filtro selecionado.</p>

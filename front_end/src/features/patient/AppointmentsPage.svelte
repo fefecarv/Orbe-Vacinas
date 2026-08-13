@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import Button from '../../design-system/components/Button.svelte';
   import Card from '../../design-system/components/Card.svelte';
   import StatusBadge from '../../design-system/components/StatusBadge.svelte';
@@ -6,39 +7,86 @@
   import Toast from '../../design-system/components/Toast.svelte';
   import CollectionPanel from '../../design-system/components/CollectionPanel.svelte';
   import ViewModeToggle from '../../design-system/components/ViewModeToggle.svelte';
-  import { currentPatient } from '../../mocks/patient';
-  import { cancelAppointment, listAppointments, people, rescheduleAppointment } from '../../lib/patientRepository';
+  import { currentUser, patientApi, type ApiAppointment, type ApiVaccine } from '../../lib/api';
   let { onSchedule }: { onSchedule: () => void } = $props();
   let selectedAppointment = $state('');
   let pendingAction = $state<'reschedule' | 'cancel' | 'details' | ''>('');
   let toast = $state('');
-  let items = $state(listAppointments(currentPatient.id));
-  let newDate = $state('2026-08-03');
+  type AppointmentView = {
+    id: string; vaccine: string; manufacturer: string; date: string; time: string;
+    location: string; dose: string; status: 'confirmed' | 'pending' | 'completed' | 'cancelled';
+    manageable: boolean;
+    cancellationReason?: string;
+  };
+  const user = currentUser();
+  let people = $state([{ id: `u:${user?.id ?? ''}`, name: user?.nome ?? 'Titular' }]);
+  let items = $state<AppointmentView[]>([]);
+  let newDate = $state(new Date(Date.now() + 86_400_000).toISOString().slice(0, 10));
   let newTime = $state('10:00');
   let cancellationReason = $state('Imprevisto pessoal');
-  let selectedPatient = $state(currentPatient.id);
+  let selectedPatient = $state(`u:${user?.id ?? ''}`);
+  let loading = $state(true);
+  let loadError = $state('');
   let viewMode = $state<'grid' | 'list'>((localStorage.getItem('orbe-view-appointments') as 'grid' | 'list') ?? 'grid');
   let selectedRecord = $derived(items.find((item) => item.id === selectedAppointment));
   $effect(() => localStorage.setItem('orbe-view-appointments', viewMode));
-  function confirmAction() {
+  function mapAppointment(item: ApiAppointment, vaccines: ApiVaccine[]): AppointmentView {
+    const vaccine = vaccines.find((candidate) => candidate.id === item.vacinaId);
+    const date = new Date(item.dataAgendamento);
+    const statuses: Record<string, AppointmentView['status']> = {
+      CONFIRMADO: 'confirmed', PENDENTE: 'pending', CONCLUIDO: 'completed', CANCELADO: 'cancelled',
+    };
+    return {
+      id: String(item.id), vaccine: vaccine?.nome ?? `Vacina #${item.vacinaId}`,
+      manufacturer: vaccine?.fabricante ?? 'Fabricante não informado',
+      date: date.toLocaleDateString('pt-BR', { dateStyle: 'long' }),
+      time: date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      location: [item.unidade, item.sala].filter(Boolean).join(' · '), dose: item.dosePrevista,
+      status: statuses[item.status] ?? 'pending', cancellationReason: item.motivoCancelamento ?? undefined,
+      manageable: ['PENDENTE', 'CONFIRMADO'].includes(item.status),
+    };
+  }
+  async function loadAppointments() {
+    const [kind, rawId] = selectedPatient.split(':');
+    const patientId = Number(rawId);
+    if (!patientId) return;
+    loading = true; loadError = '';
+    try {
+      const [appointments, vaccines] = await Promise.all([
+        kind === 'd' ? patientApi.appointmentsForDependent(patientId) : patientApi.appointments(patientId),
+        patientApi.vaccines(),
+      ]);
+      items = appointments.map((item) => mapAppointment(item, vaccines));
+    } catch (exception) {
+      loadError = exception instanceof Error ? exception.message : 'Não foi possível carregar os agendamentos.';
+    } finally { loading = false; }
+  }
+  async function confirmAction() {
     if (pendingAction === 'details') {
       pendingAction = '';
       selectedAppointment = '';
       return;
     }
-    if (pendingAction === 'cancel') cancelAppointment(selectedAppointment, cancellationReason);
-    else
-      rescheduleAppointment(
-        selectedAppointment,
-        newDate === '2026-08-03' ? '3 de agosto de 2026' : '5 de agosto de 2026',
-        newTime,
-      );
-    items = listAppointments(selectedPatient);
-    toast =
-      pendingAction === 'cancel' ? 'Agendamento cancelado com sucesso.' : 'Agendamento atualizado para a nova data.';
+    try {
+      if (pendingAction === 'cancel') await patientApi.cancelAppointment(Number(selectedAppointment), cancellationReason);
+      else await patientApi.rescheduleAppointment(Number(selectedAppointment), `${newDate}T${newTime}:00`);
+      await loadAppointments();
+      toast = pendingAction === 'cancel' ? 'Agendamento cancelado com sucesso.' : 'Agendamento atualizado para a nova data.';
+    } catch (exception) {
+      toast = exception instanceof Error ? exception.message : 'Não foi possível atualizar o agendamento.';
+    }
     pendingAction = '';
     selectedAppointment = '';
   }
+  onMount(async () => {
+    try {
+      const dependents = await patientApi.dependents();
+      people = [people[0], ...dependents.map((item) => ({ id:`d:${item.id}`, name:item.nome }))];
+    } catch (exception) {
+      loadError = exception instanceof Error ? exception.message : 'Não foi possível carregar os dependentes.';
+    }
+    await loadAppointments();
+  });
 </script>
 
 <div class="page">
@@ -46,18 +94,20 @@
     <div>
       <p class="eyebrow">Vacinação</p>
       <h1>Agendamentos</h1>
-      <p>Acompanhe e gerencie as próximas vacinas de {currentPatient.firstName}.</p>
+      <p>Acompanhe e gerencie as próximas vacinas de {user?.nome.split(' ')[0] ?? 'sua família'}.</p>
     </div>
     <Button onclick={onSchedule}>Agendar vacina</Button>
   </header>
   <label class="patient-pill"
-    >Carteira de <select bind:value={selectedPatient} onchange={() => (items = listAppointments(selectedPatient))}
+    >Carteira de <select bind:value={selectedPatient} onchange={loadAppointments}
       >{#each people as person}<option value={person.id}>{person.name}</option>{/each}</select
     ></label
   >
   <div class="collection">
     <CollectionPanel title="Agendamentos" description="Alterne entre grade e lista conforme sua preferência.">
       {#snippet actions()}<ViewModeToggle bind:value={viewMode} />{/snippet}
+      {#if loadError}<p class="load-message error">{loadError}</p>{/if}
+      {#if loading}<p class="load-message">Carregando agendamentos...</p>{/if}
       <div class="list {viewMode}">
         {#each items as appointment}<Card
             ><article>
@@ -88,7 +138,7 @@
                     selectedAppointment = appointment.id;
                     pendingAction = 'details';
                   }}>Ver detalhes</Button
-                >{#if appointment.status !== 'cancelled'}<Button
+                >{#if appointment.manageable}<Button
                     variant="ghost"
                     size="sm"
                     onclick={() => {
@@ -104,7 +154,7 @@
                   >{/if}
               </div>
             </article></Card
-          >{/each}{#if items.length === 0}<Card><p>Nenhum agendamento encontrado para esta pessoa.</p></Card>{/if}
+          >{/each}{#if !loading && items.length === 0}<Card><p>Nenhum agendamento encontrado para esta pessoa.</p></Card>{/if}
       </div>
     </CollectionPanel>
   </div>
@@ -159,11 +209,7 @@
           ></label
         >{:else}<div class="dialog-grid">
           <label class="dialog-field"
-            >Nova data<select bind:value={newDate}
-              ><option value="2026-08-03">3 de agosto de 2026</option><option value="2026-08-05"
-                >5 de agosto de 2026</option
-              ></select
-            ></label
+            >Nova data<input type="date" min={new Date().toISOString().slice(0, 10)} bind:value={newDate} /></label
           ><label class="dialog-field"
             >Novo horário<select bind:value={newTime}
               ><option>09:00</option><option>10:00</option><option>14:30</option></select
@@ -299,6 +345,16 @@
     padding: 0 var(--space-3);
     color: var(--text-primary);
   }
+  .dialog-field input {
+    min-height: 2.7rem;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-card);
+    padding: 0 var(--space-3);
+    color: var(--text-primary);
+  }
+  .load-message { padding: var(--space-4); color: var(--text-secondary); }
+  .load-message.error { color: var(--status-danger); }
   @media (max-width: 1000px) {
     .list.grid {
       grid-template-columns: 1fr;

@@ -1,10 +1,54 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import Alert from '../../design-system/components/Alert.svelte';
   import Button from '../../design-system/components/Button.svelte';
   import Card from '../../design-system/components/Card.svelte';
   import StatusBadge from '../../design-system/components/StatusBadge.svelte';
   import Tooltip from '../../design-system/components/Tooltip.svelte';
-  import { appointments, currentPatient, vaccineHistory } from '../../mocks/patient';
+  import { currentUser, patientApi, type ApiAppointment, type ApiVaccine } from '../../lib/api';
   let { onNavigate }: { onNavigate: (page: string) => void } = $props();
+  type DashboardAppointment = {
+    id: number; vaccine: string; date: Date; dose: string; location: string;
+    status: 'confirmed' | 'pending' | 'completed' | 'cancelled';
+  };
+  const user = currentUser();
+  let appointments = $state<DashboardAppointment[]>([]);
+  let applicationCount = $state(0);
+  let dependentCount = $state(0);
+  let loading = $state(true);
+  let error = $state('');
+  let nextAppointment = $derived(appointments.find((item) => item.status !== 'cancelled'));
+
+  function mapAppointment(item: ApiAppointment, vaccines: ApiVaccine[]): DashboardAppointment {
+    const statuses: Record<string, DashboardAppointment['status']> = {
+      CONFIRMADO: 'confirmed', PENDENTE: 'pending', CONCLUIDO: 'completed', CANCELADO: 'cancelled',
+    };
+    return {
+      id: item.id,
+      vaccine: vaccines.find((vaccine) => vaccine.id === item.vacinaId)?.nome ?? `Vacina #${item.vacinaId}`,
+      date: new Date(item.dataAgendamento), dose: item.dosePrevista,
+      location: [item.unidade, item.sala].filter(Boolean).join(' · '),
+      status: statuses[item.status] ?? 'pending',
+    };
+  }
+
+  onMount(async () => {
+    if (!user) { loading = false; return; }
+    try {
+      const [apiAppointments, vaccines, applications, dependents] = await Promise.all([
+        patientApi.appointments(user.id), patientApi.vaccines(),
+        patientApi.applications(user.id), patientApi.dependents(),
+      ]);
+      appointments = apiAppointments
+        .map((item) => mapAppointment(item, vaccines))
+        .filter((item) => item.date >= new Date() && item.status !== 'cancelled')
+        .sort((a, b) => a.date.getTime() - b.date.getTime());
+      applicationCount = applications.length;
+      dependentCount = dependents.length;
+    } catch (exception) {
+      error = exception instanceof Error ? exception.message : 'Não foi possível carregar o painel.';
+    } finally { loading = false; }
+  });
 </script>
 
 <div class="page">
@@ -12,20 +56,22 @@
     <div>
       <p class="eyebrow">Portal do paciente</p>
       <div class="title-row">
-        <h1>Boa noite, {currentPatient.firstName}</h1>
+        <h1>Olá, {user?.nome.split(' ')[0] ?? 'paciente'}</h1>
         <Tooltip text="Acompanhe seus agendamentos e mantenha sua vacinação em dia." />
       </div>
     </div>
     <Button onclick={() => onNavigate('booking')}>Agendar vacina</Button>
   </header>
+  {#if error}<Alert tone="danger">{error}</Alert>{/if}
+  {#if loading}<p class="loading">Carregando seu painel...</p>{/if}
 
   <section class="hero-grid" aria-label="Destaques">
     <article class="hero primary">
       <span class="hero-icon">✦</span>
       <div>
         <p>Próximo agendamento</p>
-        <h2>{appointments[0].vaccine}</h2>
-        <strong>{appointments[0].date} às {appointments[0].time}</strong>
+        <h2>{nextAppointment?.vaccine ?? 'Nenhum horário reservado'}</h2>
+        <strong>{nextAppointment ? `${nextAppointment.date.toLocaleDateString('pt-BR')} às ${nextAppointment.date.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' })}` : 'Agende quando precisar'}</strong>
       </div>
       <button onclick={() => onNavigate('appointments')}>Ver detalhes →</button>
     </article>
@@ -34,7 +80,7 @@
       <div>
         <p>Sua carteira, sempre com você</p>
         <h2>Histórico de vacinação</h2>
-        <strong>{vaccineHistory.length} aplicações registradas</strong>
+        <strong>{applicationCount} aplicações registradas</strong>
       </div>
       <button onclick={() => onNavigate('history')}>Acessar carteira →</button>
     </article>
@@ -43,7 +89,7 @@
       <div>
         <p>Proteção para sua família</p>
         <h2>Gerencie dependentes</h2>
-        <strong>Agende e acompanhe em um só lugar</strong>
+        <strong>{dependentCount} {dependentCount === 1 ? 'dependente vinculado' : 'dependentes vinculados'}</strong>
       </div>
       <button onclick={() => onNavigate('family')}>Minha família →</button>
     </article>
@@ -58,23 +104,24 @@
       <button class="text-link" onclick={() => onNavigate('appointments')}>Ver todos</button>
     </div>
     <div class="appointment-grid">
-      {#each appointments as appointment}
+      {#each appointments.slice(0, 4) as appointment}
         <Card padding="sm">
           <div class="appointment-card">
             <div class="date-box">
-              <strong>{appointment.date.split(' ')[0]}</strong><span>{appointment.date.split(' ')[2].slice(0, 3)}</span>
+              <strong>{appointment.date.getDate()}</strong><span>{appointment.date.toLocaleDateString('pt-BR', { month:'short' }).replace('.', '')}</span>
             </div>
             <div class="appointment-info">
               <div class="appointment-title">
                 <h3>{appointment.vaccine}</h3>
                 <StatusBadge status={appointment.status} />
               </div>
-              <p>{appointment.dose} · {appointment.time}</p>
+              <p>{appointment.dose} · {appointment.date.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' })}</p>
               <small>{appointment.location}</small>
             </div>
           </div>
         </Card>
       {/each}
+      {#if !loading && appointments.length === 0}<Card padding="sm"><p class="empty">Você não possui próximos agendamentos.</p></Card>{/if}
     </div>
   </section>
 
@@ -99,6 +146,8 @@
     margin: 0 auto;
     padding: var(--space-8);
   }
+  .loading, .empty { color: var(--text-secondary); font-size: var(--text-sm); }
+  .loading { margin-top: var(--space-4); }
   .page-header,
   .section-heading {
     display: flex;

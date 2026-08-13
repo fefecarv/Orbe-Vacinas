@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import Button from '../../design-system/components/Button.svelte';
   import Card from '../../design-system/components/Card.svelte';
   import PageHeader from '../../design-system/components/PageHeader.svelte';
@@ -7,8 +8,8 @@
   import ViewModeToggle from '../../design-system/components/ViewModeToggle.svelte';
   import Tooltip from '../../design-system/components/Tooltip.svelte';
   import AdminCrudDialog from './AdminCrudDialog.svelte';
-  import { adminUsers, auditEvents, batches, movements } from '../../mocks/admin';
-  import { vaccines, insurances } from '../../mocks/portal';
+  import { movements } from '../../mocks/admin';
+  import { adminApi, patientApi, type ManagementReport } from '../../lib/api';
   let {
     mode,
     onNavigate,
@@ -42,63 +43,19 @@
       return fallback;
     }
   }
-  let usersData = $state<Row[]>(
-    stored(
-      'orbe-admin-users',
-      adminUsers.map((u) => ({ ...u })),
-    ),
-  );
-  let vaccinesData = $state<Row[]>(
-    stored(
-      'orbe-admin-vaccines',
-      vaccines.map((v) => ({
-        id: v.id,
-        name: v.name,
-        manufacturer: v.manufacturer,
-        age: v.age,
-        price: String(v.price),
-        status: v.available ? 'Ativo' : 'Inativo',
-      })),
-    ),
-  );
-  let batchesData = $state<Row[]>(
-    stored(
-      'orbe-admin-batches',
-      batches.map((b) => ({
-        id: b.id,
-        number: b.number,
-        vaccine: b.vaccine,
-        manufacturer: b.manufacturer,
-        expires: b.expires,
-        quantity: String(b.quantity),
-        status: b.status,
-      })),
-    ),
-  );
-  let insuranceData = $state<Row[]>(
-    stored(
-      'orbe-admin-insurance',
-      insurances.map((i, index) => ({
-        id: i.id,
-        company: i.company,
-        plan: i.plan,
-        code: `CV-${String(index + 1).padStart(4, '0')}`,
-        validUntil: i.validUntil,
-        status: i.active ? 'Ativo' : 'Inativo',
-      })),
-    ),
-  );
-  let auditData = $state<Row[]>([...stored('orbe-runtime-audit', []), ...auditEvents.map((event) => ({ ...event }))]);
+  let usersData = $state<Row[]>([]);
+  let vaccinesData = $state<Row[]>([]);
+  let batchesData = $state<Row[]>([]);
+  let insuranceData = $state<Row[]>([]);
+  let auditData = $state<Row[]>([]);
+  let report = $state<ManagementReport>({pacientesAtivos:0,aplicacoesPeriodo:0,dosesEstoque:0,lotesAlerta:0,agendamentosTotal:0,concluidos:0,faltas:0,cancelados:0,dosesPerdidas:0,receita:0,aplicacoesPorSemana:[],vacinasMaisAplicadas:[],alertas:[]});
+  const reportEnd=new Date().toISOString().slice(0,10);const reportStart=new Date(Date.now()-29*86400000).toISOString().slice(0,10);
   let modalEntity = $state<Entity | null>(null);
   let editIndex = $state(-1);
   let toast = $state('');
   let advancedFilters = $state(false);
   let adminView = $state<'grid' | 'list'>((localStorage.getItem('orbe-view-admin') as 'grid' | 'list') ?? 'list');
   $effect(() => localStorage.setItem('orbe-view-admin', adminView));
-  $effect(() => localStorage.setItem('orbe-admin-users', JSON.stringify(usersData)));
-  $effect(() => localStorage.setItem('orbe-admin-vaccines', JSON.stringify(vaccinesData)));
-  $effect(() => localStorage.setItem('orbe-admin-batches', JSON.stringify(batchesData)));
-  $effect(() => localStorage.setItem('orbe-admin-insurance', JSON.stringify(insuranceData)));
   function currentRows(entity: Entity) {
     return entity === 'user'
       ? usersData
@@ -117,26 +74,38 @@
       mode === 'users' ? 'user' : mode === 'vaccines' ? 'vaccine' : mode === 'stock' ? 'batch' : 'insurance';
     editIndex = index;
   }
-  function saveEntity(values: Row) {
+  async function saveEntity(values: Row) {
     if (!modalEntity) return;
-    const rows = currentRows(modalEntity);
-    const next = { ...values, id: editIndex >= 0 ? rows[editIndex].id : `mock-${Date.now()}` };
-    const updated = editIndex >= 0 ? rows.map((row, index) => (index === editIndex ? next : row)) : [next, ...rows];
-    if (modalEntity === 'user') usersData = updated;
-    else if (modalEntity === 'vaccine') vaccinesData = updated;
-    else if (modalEntity === 'batch') batchesData = updated;
-    else insuranceData = updated;
-    toast = editIndex >= 0 ? 'Registro atualizado com sucesso.' : 'Registro cadastrado com sucesso.';
-    modalEntity = null;
-    editIndex = -1;
+    try {
+      const rows=currentRows(modalEntity);const id=editIndex>=0?Number(rows[editIndex].id):undefined;
+      if(modalEntity==='vaccine')await adminApi.saveVaccine({id,nome:values.name,fabricante:values.manufacturer,descricao:values.description,categoria:values.category,indicacao:values.age,esquemaDoses:values.doses,valorBase:Number(values.price),ativo:values.status==='Ativo'});
+      else if(modalEntity==='batch'){const vaccine=vaccinesData.find(item=>item.name.toLowerCase()===values.vaccine.toLowerCase());if(!vaccine)throw new Error('Selecione uma vacina cadastrada pelo nome exato.');await adminApi.saveLot({id,vacinaId:Number(vaccine.id),numeroLote:values.number,dataValidade:values.expires,quantidadeInicial:Number(values.quantity),quantidadeAtual:editIndex>=0?Number(rows[editIndex].quantity):Number(values.quantity),fornecedor:values.supplier,status:values.status==='Inativo'?'BLOQUEADO':'ATIVO'});}
+      else if(modalEntity==='insurance')await adminApi.saveInsurance({id,nome:values.company,plano:values.plan,codigoOperacional:values.code,ativo:values.status==='Ativo',tipoCobertura:values.coverageType,percentualDesconto:values.discount?Number(values.discount):null,valorCoparticipacao:values.copay?Number(values.copay):null});
+      else if(modalEntity==='user'){
+        if(id)throw new Error('A alteração de perfil existente exige uma operação específica de segurança.');
+        const profiles:Record<string,string>={Paciente:'PACIENTE',Funcionário:'FUNCIONARIO',Administrador:'ADMINISTRADOR'};
+        await adminApi.createUser({nome:values.name,cpf:values.cpf,email:values.email,telefone:values.phone,dataNascimento:values.birth,senha:values.password,perfil:profiles[values.role],matricula:values.registration});
+      }
+      await loadAdminData();toast=editIndex>=0?'Registro atualizado com sucesso.':'Registro cadastrado com sucesso.';modalEntity=null;editIndex=-1;
+    } catch(exception){toast=exception instanceof Error?exception.message:'Não foi possível salvar o registro.';}
   }
+  async function loadAdminData(){
+    try{const [users,vaccineList,lots,insurance,audit,management]=await Promise.all([adminApi.users(),patientApi.vaccines(),adminApi.lots(),adminApi.insurances(),adminApi.audit(),adminApi.report(reportStart,reportEnd)]);report=management;
+      usersData=users.map(u=>({id:String(u.id),name:u.nome,email:u.email,cpf:u.cpf,phone:u.telefone,birth:u.dataNascimento,role:{PACIENTE:'Paciente',FUNCIONARIO:'Funcionário',ADMINISTRADOR:'Administrador'}[u.perfil],registration:u.matricula??'',lastAccess:u.ultimoAcessoEm?new Date(u.ultimoAcessoEm).toLocaleString('pt-BR'):'Ainda não acessou',status:u.status==='ATIVO'?'Ativo':u.status}));
+      vaccinesData=vaccineList.map(v=>({id:String(v.id),name:v.nome,manufacturer:v.fabricante,description:v.descricao,category:v.categoria,age:v.indicacao,doses:v.esquemaDoses,price:String(v.valorBase),status:v.ativo?'Ativo':'Inativo'}));
+      batchesData=lots.map(l=>{const v=vaccineList.find(item=>item.id===l.vacinaId);return{id:String(l.id),number:l.numeroLote,vaccine:v?.nome??`Vacina #${l.vacinaId}`,manufacturer:v?.fabricante??'',expires:l.dataValidade,quantity:String(l.quantidadeAtual),initialQuantity:String(l.quantidadeInicial),supplier:l.fornecedor,status:l.status==='ATIVO'?'Regular':'Inativo'};});
+      insuranceData=insurance.map(i=>({id:String(i.id),company:i.nome,plan:i.plano,code:i.codigoOperacional,coverageType:i.tipoCobertura,discount:String(i.percentualDesconto??''),copay:String(i.valorCoparticipacao??''),status:i.ativo?'Ativo':'Inativo'}));
+      auditData=audit.map((e:any)=>({date:e.criadoEm?new Date(e.criadoEm).toLocaleString('pt-BR'):'',user:String(e.usuarioId??'Sistema'),action:e.acao??'',resource:`${e.entidade??''} ${e.entidadeId??''}`,ip:e.ip??''}));
+    }catch(exception){toast=exception instanceof Error?exception.message:'Não foi possível carregar os dados administrativos.';}
+  }
+  onMount(loadAdminData);
   function exportReport() {
     const csv = [
       ['Indicador', 'Valor', 'Período'],
-      ['Aplicações', '46', 'Últimos 30 dias'],
-      ['Receita estimada', 'R$ 18.420', 'Últimos 30 dias'],
-      ['Taxa de faltas', '6,2%', 'Últimos 30 dias'],
-      ['Doses perdidas', '4', 'Últimos 30 dias'],
+      ['Aplicações', String(report.aplicacoesPeriodo), 'Últimos 30 dias'],
+      ['Receita', String(report.receita), 'Últimos 30 dias'],
+      ['Faltas', String(report.faltas), 'Últimos 30 dias'],
+      ['Doses perdidas', String(report.dosesPerdidas), 'Últimos 30 dias'],
     ]
       .map((row) => row.join(';'))
       .join('\n');
@@ -154,10 +123,10 @@
   {#if mode === 'dashboard'}<PageHeader
       eyebrow="Administração"
       title="Visão gerencial"
-      description="Resumo da clínica em 22 de julho de 2026."
+      description={`Resumo da clínica em ${new Date().toLocaleDateString('pt-BR')}.`}
     />
     <div class="stats">
-      {#each [{ n: '128', l: 'Pacientes ativos', d: '+8 este mês' }, { n: '46', l: 'Aplicações no mês', d: '+12% no período' }, { n: '95', l: 'Doses em estoque', d: '4 lotes ativos' }, { n: '2', l: 'Alertas de estoque', d: 'Requer atenção' }] as item}<Card
+      {#each [{ n: String(report.pacientesAtivos), l: 'Pacientes ativos', d: 'Cadastros habilitados' }, { n: String(report.aplicacoesPeriodo), l: 'Aplicações no período', d: 'Últimos 30 dias' }, { n: String(report.dosesEstoque), l: 'Doses em estoque', d: 'Lotes ativos e válidos' }, { n: String(report.lotesAlerta), l: 'Alertas de estoque', d: 'Requer atenção' }] as item}<Card
           ><div class="stat"><span>{item.l}</span><strong>{item.n}</strong><small>{item.d}</small></div></Card
         >{/each}
     </div>
@@ -171,9 +140,9 @@
           <button onclick={() => onNavigate('admin-reports')}>Ver relatório</button>
         </div>
         <div class="chart">
-          {#each [{ v: 45, l: 'S25' }, { v: 62, l: 'S26' }, { v: 54, l: 'S27' }, { v: 78, l: 'S28' }, { v: 91, l: 'S29' }] as bar}<div
+          {#each report.aplicacoesPorSemana as bar}<div
             >
-              <span style={`height:${bar.v}%`}></span><small>{bar.l}</small>
+              <span style={`height:${Math.max(5,bar.quantidade/Math.max(1,...report.aplicacoesPorSemana.map(item=>item.quantidade))*100)}%`}></span><small>{bar.periodo}</small>
             </div>{/each}
         </div></Card
       ><Card
@@ -184,19 +153,8 @@
           </div>
         </div>
         <div class="alerts">
-          <button onclick={() => onNavigate('admin-stock')}
-            ><i class="danger">!</i><span
-              ><strong>Febre amarela com estoque baixo</strong><small>7 doses disponíveis</small></span
-            ><b>›</b></button
-          ><button onclick={() => onNavigate('admin-stock')}
-            ><i class="warning">!</i><span
-              ><strong>Lote próximo da validade</strong><small>LT-260502 · setembro de 2026</small></span
-            ><b>›</b></button
-          ><button onclick={() => onNavigate('admin-stock')}
-            ><i class="success">✓</i><span
-              ><strong>Inventário conciliado</strong><small>Última revisão ontem</small></span
-            ><b>›</b></button
-          >
+          {#each report.alertas as alert}<button onclick={() => onNavigate('admin-stock')}><i class={alert.tipo==='VALIDADE'?'warning':'danger'}>!</i><span><strong>{alert.vacina}</strong><small>{alert.lote} · {alert.tipo==='VALIDADE'?`validade ${new Date(`${alert.validade}T12:00:00`).toLocaleDateString('pt-BR')}`:`${alert.quantidade} doses`}</small></span><b>›</b></button>{/each}
+          {#if report.alertas.length===0}<button><i class="success">✓</i><span><strong>Sem alertas prioritários</strong><small>Estoque dentro dos parâmetros</small></span></button>{/if}
         </div></Card
       >
     </div>
@@ -219,24 +177,23 @@
         >
       </div>
       <div class="stats reports">
-        {#each [{ n: '46', l: 'Aplicações', d: '38 particulares · 8 convênios' }, { n: 'R$ 18.420', l: 'Receita estimada', d: '+9% sobre o período anterior' }, { n: '6,2%', l: 'Taxa de faltas', d: '3 ausências em 48 agendas' }, { n: '4', l: 'Doses perdidas', d: '2 ajustes · 2 vencimentos' }] as item}<Card
+        {#each [{ n: String(report.aplicacoesPeriodo), l: 'Aplicações', d: 'Últimos 30 dias' }, { n: report.receita.toLocaleString('pt-BR',{style:'currency',currency:'BRL'}), l: 'Receita registrada', d: 'Valores informados nas aplicações' }, { n: `${report.agendamentosTotal?((report.faltas/report.agendamentosTotal)*100).toFixed(1):'0,0'}%`, l: 'Taxa de faltas', d: `${report.faltas} ausências em ${report.agendamentosTotal} agendas` }, { n: String(report.dosesPerdidas), l: 'Doses perdidas', d: 'Perdas e vencimentos registrados' }] as item}<Card
             ><div class="stat"><span>{item.l}</span><strong>{item.n}</strong><small>{item.d}</small></div></Card
           >{/each}
       </div>
       <div class="report-grid">
         <Card
           ><h2>Vacinas mais aplicadas</h2>
-          {#each [{ n: 'Influenza', v: 18, p: 100 }, { n: 'Hepatite B', v: 11, p: 61 }, { n: 'HPV', v: 9, p: 50 }, { n: 'Febre amarela', v: 8, p: 44 }] as row}<div
+          {#each report.vacinasMaisAplicadas as row}<div
               class="metric"
             >
-              <span><b>{row.n}</b><small>{row.v} aplicações</small></span><i><em style={`width:${row.p}%`}></em></i>
+              <span><b>{row.vacina}</b><small>{row.quantidade} aplicações</small></span><i><em style={`width:${row.quantidade/Math.max(1,...report.vacinasMaisAplicadas.map(item=>item.quantidade))*100}%`}></em></i>
             </div>{/each}</Card
         ><Card
           ><h2>Atendimentos por situação</h2>
-          <div class="donut"><div>48<small>Total</small></div></div>
+          <div class="donut"><div>{report.agendamentosTotal}<small>Total</small></div></div>
           <div class="legend">
-            <span><i class="green"></i>Concluídos <b>42</b></span><span><i class="yellow"></i>Faltas <b>3</b></span
-            ><span><i class="gray"></i>Cancelados <b>3</b></span>
+            <span><i class="green"></i>Concluídos <b>{report.concluidos}</b></span><span><i class="yellow"></i>Faltas <b>{report.faltas}</b></span><span><i class="gray"></i>Cancelados <b>{report.cancelados}</b></span>
           </div></Card
         >
       </div>
@@ -284,8 +241,8 @@
         true,
       )}{@render Pagination(Math.ceil(vaccinesData.length / pageSize))}
     {:else if mode === 'insurance'}{@render Toolbar()}{@render DataTable(
-        ['Convênio', 'Plano', 'Código', 'Validade', 'Situação', ''],
-        insuranceData.map((i) => [i.company, i.plan, i.code, i.validUntil, i.status, 'Editar']),
+        ['Convênio', 'Plano', 'Código', 'Cobertura', 'Situação', ''],
+        insuranceData.map((i) => [i.company, i.plan, i.code, i.coverageType, i.status, 'Editar']),
         true,
       )}
     {:else if mode === 'audit'}<div class="audit-filter">

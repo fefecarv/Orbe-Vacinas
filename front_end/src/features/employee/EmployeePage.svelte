@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import Alert from '../../design-system/components/Alert.svelte';
   import Button from '../../design-system/components/Button.svelte';
   import Card from '../../design-system/components/Card.svelte';
@@ -8,33 +9,37 @@
   import CollectionPanel from '../../design-system/components/CollectionPanel.svelte';
   import ViewModeToggle from '../../design-system/components/ViewModeToggle.svelte';
   import PatientDialog from './PatientDialog.svelte';
-  import { dailyAppointments, type QueueStatus } from '../../mocks/employee';
-  import { vaccines } from '../../mocks/portal';
-  import {
-    getPatients,
-    getQueueStatuses,
-    registerApplication,
-    savePatients,
-    saveQueueStatuses,
-    type ApplicationRecord,
-    type StoredPatient,
-  } from '../../lib/mockOperations';
+  import type { QueueStatus } from '../../mocks/employee';
+  import { currentUser, staffApi, type ApiBatch, type RegisteredApplication, type StaffPatient, type StaffPatientInput } from '../../lib/api';
   let {
     mode,
     onNavigate,
   }: { mode: 'dashboard' | 'agenda' | 'patients' | 'application'; onNavigate: (page: string) => void } = $props();
-  let statuses = $state<Record<string, QueueStatus>>(getQueueStatuses());
-  let patients = $state<StoredPatient[]>(getPatients());
+  type DailyAppointment = { id:string; time:string; patient:string; cpf:string; vaccine:string; vaccineId:number; usuarioId:number|null; dependenteId:number|null; dose:string; room:string; status:QueueStatus; tipoAtendimento:'PARTICULAR'|'CONVENIO'|'CAMPANHA' };
+  let dailyAppointments = $state<DailyAppointment[]>([]);
+  let statuses = $state<Record<string, QueueStatus>>({});
+  let patients = $state<StaffPatient[]>([]);
   let query = $state('');
   let applied = $state(false);
   let selectedPatient = $state('');
   let selectedVaccine = $state('');
   let batch = $state('');
   let dose = $state('');
-  let receipt = $state<ApplicationRecord | null>(null);
+  let receipt = $state<RegisteredApplication | null>(null);
+  let availableBatches = $state<ApiBatch[]>([]);
+  let applicationDate = $state(new Date().toISOString().slice(0, 10));
+  let applicationTime = $state(new Date().toTimeString().slice(0, 5));
+  let administrationRoute = $state('Intramuscular');
+  let applicationSite = $state('Deltoide direito');
+  let applicationError = $state('');
+  let submittingApplication = $state(false);
   let patientDialog = $state(false);
-  let editingPatient = $state<StoredPatient | null>(null);
+  let editingPatient = $state<StaffPatient | null>(null);
   let toast = $state('');
+  let agendaLoading = $state(true);
+  let agendaError = $state('');
+  const staffUser = currentUser();
+  const today = new Date().toISOString().slice(0, 10);
   let agendaView = $state<'grid' | 'list'>(
     (localStorage.getItem('orbe-view-staff-agenda') as 'grid' | 'list') ?? 'list',
   );
@@ -50,58 +55,104 @@
     completed: 'Concluído',
   };
   let filteredPatients = $derived(
-    patients.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || p.cpf.includes(query)),
+    patients.filter((p) => p.nome.toLowerCase().includes(query.toLowerCase()) || p.cpf.includes(query)),
   );
-  function advance(id: string) {
+  let selectedClinicalAppointment = $derived(dailyAppointments.find((item) => item.id === selectedPatient));
+  let selectedBatch = $derived(availableBatches.find((item) => String(item.id) === batch));
+  async function advance(id: string) {
     const order: QueueStatus[] = ['confirmed', 'waiting', 'in_service', 'completed'];
     const current = order.indexOf(statuses[id]);
+    if (statuses[id] === 'in_service') {
+      sessionStorage.setItem('orbe-application-appointment', id);
+      onNavigate('staff-application');
+      return;
+    }
     if (current < 3) {
-      statuses = { ...statuses, [id]: order[current + 1] };
-      saveQueueStatuses(statuses);
-      toast = `Atendimento atualizado para “${labels[statuses[id]]}”.`;
+      const next = order[current + 1];
+      const apiStatuses: Partial<Record<QueueStatus, 'ESPERA'|'EM_ATENDIMENTO'|'CONCLUIDO'>> = {
+        waiting:'ESPERA', in_service:'EM_ATENDIMENTO', completed:'CONCLUIDO',
+      };
+      const apiStatus = apiStatuses[next];
+      if (!apiStatus) return;
+      try {
+        await staffApi.updateAppointmentStatus(Number(id), apiStatus);
+        statuses = { ...statuses, [id]: next };
+        toast = `Atendimento atualizado para “${labels[next]}”.`;
+      } catch (exception) {
+        toast = exception instanceof Error ? exception.message : 'Não foi possível atualizar o atendimento.';
+      }
     }
   }
-  function submit(e: SubmitEvent) {
+  onMount(async () => {
+    try {
+      const [agenda, patientList] = await Promise.all([staffApi.dailyAgenda(today), staffApi.patients()]);
+      patients = patientList;
+      const statusMap: Record<string, QueueStatus> = { PENDENTE:'confirmed', CONFIRMADO:'confirmed', ESPERA:'waiting', EM_ATENDIMENTO:'in_service', CONCLUIDO:'completed' };
+      dailyAppointments = agenda.map((item) => ({
+        id:String(item.id), time:new Date(item.dataAgendamento).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}),
+        patient:item.paciente, cpf:item.cpf ? `***.***.***-${item.cpf.slice(-2)}` : 'Não informado',
+        vaccine:item.vacina, vaccineId:item.vacinaId, usuarioId:item.usuarioId, dependenteId:item.dependenteId,
+        dose:item.dose, room:item.sala || 'A confirmar', status:statusMap[item.status] ?? 'confirmed', tipoAtendimento:item.tipoAtendimento,
+      }));
+      statuses = Object.fromEntries(dailyAppointments.map((item) => [item.id, item.status]));
+      const requested = sessionStorage.getItem('orbe-application-appointment');
+      const candidate = dailyAppointments.find((item) => item.id === requested)
+        ?? dailyAppointments.find((item) => item.status === 'in_service');
+      if (candidate) await selectApplicationAppointment(candidate.id);
+    } catch (exception) { agendaError = exception instanceof Error ? exception.message : 'Não foi possível carregar a agenda.'; }
+    finally { agendaLoading = false; }
+  });
+  async function selectApplicationAppointment(id: string) {
+    selectedPatient = id;
+    const appointment = dailyAppointments.find((item) => item.id === id);
+    selectedVaccine = appointment ? String(appointment.vaccineId) : '';
+    dose = appointment?.dose ?? '';
+    batch = '';
+    applicationError = '';
+    try {
+      availableBatches = appointment ? await staffApi.batches(appointment.vaccineId) : [];
+    } catch (exception) {
+      availableBatches = [];
+      applicationError = exception instanceof Error ? exception.message : 'Não foi possível carregar os lotes.';
+    }
+  }
+  async function submit(e: SubmitEvent) {
     e.preventDefault();
-    const patient = patients.find((p) => p.id === selectedPatient);
-    const vaccine = vaccines.find((v) => v.id === selectedVaccine);
-    if (selectedPatient && selectedVaccine && batch && dose && patient && vaccine) {
-      receipt = registerApplication({
-        patientId: patient.id,
-        patientName: patient.name,
-        vaccineId: vaccine.id,
-        vaccineName: vaccine.name,
-        batch,
-        dose,
-        date: '2026-07-22',
-        time: '09:15',
-        type: 'Agendado',
-        route: 'Intramuscular',
-        site: 'Deltoide direito',
-        professional: 'Ana Ribeiro · COREN 123456',
+    const appointment = dailyAppointments.find((item) => item.id === selectedPatient);
+    if (!appointment || !batch || !dose || !staffUser) return;
+    submittingApplication = true; applicationError = '';
+    try {
+      receipt = await staffApi.registerApplication({
+        agendamentoId:Number(appointment.id), usuarioId:appointment.usuarioId,
+        dependenteId:appointment.dependenteId, funcionarioId:staffUser.id,
+        loteId:Number(batch), dose, dataAplicacao:`${applicationDate}T${applicationTime}:00`,
+        tipoAtendimento:appointment.tipoAtendimento, viaAdministracao:administrationRoute,
+        localAplicacao:applicationSite, valorPago:null, observacoes:null,
       });
-      patients = getPatients();
-      applied = true;
-    }
+      applied = true; sessionStorage.removeItem('orbe-application-appointment');
+    } catch (exception) { applicationError = exception instanceof Error ? exception.message : 'Não foi possível registrar a aplicação.'; }
+    finally { submittingApplication = false; }
   }
-  function savePatient(patient: StoredPatient) {
-    const index = patients.findIndex((p) => p.id === patient.id);
-    patients = index >= 0 ? patients.map((p) => (p.id === patient.id ? patient : p)) : [patient, ...patients];
-    savePatients(patients);
-    patientDialog = false;
-    editingPatient = null;
-    toast = index >= 0 ? 'Paciente atualizado com sucesso.' : 'Paciente cadastrado com sucesso.';
+  async function savePatient(patient: StaffPatientInput, id?: string) {
+    try {
+      const saved = await staffApi.savePatient(patient, id);
+      patients = id ? patients.map((item) => item.id === id ? saved : item) : [saved, ...patients];
+      patientDialog = false; editingPatient = null;
+      toast = id ? 'Paciente atualizado com sucesso.' : 'Paciente cadastrado com sucesso.';
+    } catch (exception) {
+      toast = exception instanceof Error ? exception.message : 'Não foi possível salvar o paciente.';
+    }
   }
 </script>
 
 <div class="page">
   {#if mode === 'dashboard'}<PageHeader
       eyebrow="Operação da clínica"
-      title="Boa noite, Ana"
+      title={`Olá, ${staffUser?.nome.split(' ')[0] ?? 'profissional'}`}
       description="Acompanhe a operação e os atendimentos de hoje."
     />
     <div class="stats">
-      {#each [{ n: '12', l: 'Agendados hoje', c: '' }, { n: '3', l: 'Na sala de espera', c: 'warning' }, { n: '7', l: 'Atendimentos concluídos', c: 'success' }, { n: '2', l: 'Lotes em alerta', c: 'danger' }] as item}<Card
+      {#each [{ n: String(dailyAppointments.length), l: 'Agendados hoje', c: '' }, { n: String(Object.values(statuses).filter(s=>s==='waiting').length), l: 'Na sala de espera', c: 'warning' }, { n: String(Object.values(statuses).filter(s=>s==='completed').length), l: 'Atendimentos concluídos', c: 'success' }] as item}<Card
           ><div class="stat {item.c}"><strong>{item.n}</strong><span>{item.l}</span></div></Card
         >{/each}
     </div>
@@ -115,6 +166,8 @@
           <button onclick={() => onNavigate('staff-agenda')}>Ver agenda completa</button>
         </div>
         <div class="queue">
+          {#if agendaError}<Alert tone="danger">{agendaError}</Alert>{/if}
+          {#if agendaLoading}<p>Carregando agenda...</p>{/if}
           {#each dailyAppointments.slice(1, 5) as item}<article>
               <time>{item.time}</time>
               <div><strong>{item.patient}</strong><small>{item.vaccine} · {item.dose}</small></div>
@@ -137,7 +190,7 @@
   {:else if mode === 'agenda'}<PageHeader
       eyebrow="Atendimentos"
       title="Agenda do dia"
-      description="Quarta-feira, 22 de julho de 2026 · Unidade Centro"
+      description={`${new Date(`${today}T12:00:00`).toLocaleDateString('pt-BR', { dateStyle:'full' })} · Unidade Centro`}
       >{#snippet actions()}<Button
           variant="secondary"
           onclick={() => (toast = 'Exibindo a agenda de 22 de julho de 2026.')}>Calendário</Button
@@ -152,6 +205,8 @@
           >
         </div>
         <div class="agenda {agendaView}">
+          {#if agendaError}<Alert tone="danger">{agendaError}</Alert>{/if}
+          {#if agendaLoading}<p>Carregando agenda...</p>{/if}
           {#each dailyAppointments as item}<article>
               <time>{item.time}</time>
               <div class="patient"><strong>{item.patient}</strong><small>{item.cpf}</small></div>
@@ -166,7 +221,7 @@
                   : statuses[item.id] === 'waiting'
                     ? 'Iniciar'
                     : statuses[item.id] === 'in_service'
-                      ? 'Concluir'
+                      ? 'Registrar aplicação'
                       : 'Concluído'}</Button
               >
             </article>{/each}
@@ -193,9 +248,9 @@
             <span>Paciente</span><span>CPF</span><span>Contato</span><span>Última vacina</span><span></span>
           </div>
           {#each filteredPatients as person}<div class="tr">
-              <span><strong>{person.name}</strong><small>Nascimento: {person.birth}</small></span><span
+              <span><strong>{person.nome}</strong><small>{person.tipo === 'DEPENDENTE' ? 'Dependente' : 'Titular'} · Nascimento: {new Date(`${person.dataNascimento}T12:00:00`).toLocaleDateString('pt-BR')}</small></span><span
                 >{person.cpf}</span
-              ><span>{person.phone}</span><span>{person.lastVaccine}</span><button
+              ><span>{person.telefone ?? 'Vinculado ao responsável'}</span><span>{person.status === 'ATIVO' ? 'Ativo' : 'Inativo'}</span><button
                 onclick={() => {
                   editingPatient = person;
                   patientDialog = true;
@@ -215,31 +270,31 @@
         ><Card
           ><div class="receipt">
             <p>Comprovante de aplicação</p>
-            <h2>{receipt.vaccineName}</h2>
+            <h2>{selectedClinicalAppointment?.vaccine}</h2>
             <dl>
               <div>
                 <dt>Protocolo</dt>
-                <dd>{receipt.protocol}</dd>
+                <dd>{receipt.protocolo}</dd>
               </div>
               <div>
                 <dt>Paciente</dt>
-                <dd>{receipt.patientName}</dd>
+                <dd>{selectedClinicalAppointment?.patient}</dd>
               </div>
               <div>
                 <dt>Dose e lote</dt>
-                <dd>{receipt.dose} · {receipt.batch}</dd>
+                <dd>{receipt.dose} · {selectedBatch?.numeroLote}</dd>
               </div>
               <div>
                 <dt>Data e horário</dt>
-                <dd>22/07/2026 · {receipt.time}</dd>
+                <dd>{new Date(receipt.dataAplicacao).toLocaleString('pt-BR')}</dd>
               </div>
               <div>
                 <dt>Profissional</dt>
-                <dd>{receipt.professional}</dd>
+                <dd>{staffUser?.nome}</dd>
               </div>
               <div>
                 <dt>Local</dt>
-                <dd>{receipt.site}</dd>
+                <dd>{receipt.localAplicacao}</dd>
               </div>
             </dl>
           </div></Card
@@ -264,21 +319,18 @@
           </div>
           <div class="form-grid">
             <label
-              >Paciente<select bind:value={selectedPatient} required
-                ><option value="">Selecione</option>{#each patients.filter((p) => p.status === 'Ativo') as p}<option
-                    value={p.id}>{p.name} · {p.cpf}</option
+              >Atendimento<select bind:value={selectedPatient} onchange={() => selectApplicationAppointment(selectedPatient)} required
+                ><option value="">Selecione</option>{#each dailyAppointments.filter((p) => p.status === 'in_service') as p}<option
+                    value={p.id}>{p.time} · {p.patient} · {p.vaccine}</option
                   >{/each}</select
               ></label
             ><label
-              >Vacina<select bind:value={selectedVaccine} required
-                ><option value="">Selecione</option>{#each vaccines as v}<option value={v.id}>{v.name}</option
-                  >{/each}</select
+              >Vacina<select bind:value={selectedVaccine} disabled required
+                ><option value="">Selecione o atendimento</option>{#if selectedClinicalAppointment}<option value={String(selectedClinicalAppointment.vaccineId)}>{selectedClinicalAppointment.vaccine}</option>{/if}</select
               ></label
             ><label
               >Lote<select bind:value={batch} required
-                ><option value="">Selecione</option><option value="LT-260701"
-                  >LT-260701 · Val. 03/2027 · estoque disponível</option
-                ><option value="LT-260615">LT-260615 · Val. 12/2026 · estoque disponível</option></select
+                ><option value="">Selecione</option>{#each availableBatches as item}<option value={String(item.id)}>{item.numeroLote} · Val. {new Date(`${item.dataValidade}T12:00:00`).toLocaleDateString('pt-BR')} · {item.quantidadeAtual} doses</option>{/each}</select
               ></label
             ><FormField
               id="dose"
@@ -295,22 +347,23 @@
             <p>Informações que constarão na carteira vacinal.</p>
           </div>
           <div class="form-grid">
-            <FormField id="application-date" label="Data" type="date" value="2026-07-22" /><FormField
+            <FormField id="application-date" label="Data" type="date" value={applicationDate} oninput={(v) => (applicationDate = v)} /><FormField
               id="application-time"
               label="Horário"
-              value="09:15"
+              value={applicationTime}
+              oninput={(v) => (applicationTime = v)}
             /><label
               >Tipo de atendimento<select
                 ><option>Agendado</option><option>Encaixe</option><option>Domiciliar</option></select
               ></label
             ><label
-              >Via de administração<select
+              >Via de administração<select bind:value={administrationRoute}
                 ><option>Intramuscular</option><option>Subcutânea</option><option>Oral</option></select
               ></label
-            ><FormField id="site" label="Local de aplicação" value="Deltoide direito" /><FormField
+            ><FormField id="site" label="Local de aplicação" value={applicationSite} oninput={(v) => (applicationSite = v)} /><FormField
               id="professional"
               label="Profissional"
-              value="Ana Ribeiro · COREN 123456"
+              value={staffUser?.nome ?? ''}
               disabled
             />
           </div></Card
@@ -318,15 +371,17 @@
           >Confira vacina, dose e lote antes de concluir. O registro clínico exigirá correção auditada após a
           confirmação.</Alert
         >
+        {#if applicationError}<Alert tone="danger">{applicationError}</Alert>{/if}
         <div class="submit">
-          <Button variant="secondary" onclick={() => onNavigate('staff-agenda')}>Cancelar</Button><Button type="submit"
-            >Confirmar aplicação</Button
+          <Button variant="secondary" onclick={() => onNavigate('staff-agenda')}>Cancelar</Button><Button type="submit" disabled={submittingApplication}
+            >{submittingApplication ? 'Registrando...' : 'Confirmar aplicação'}</Button
           >
         </div>
       </form>{/if}{/if}
 </div>
 {#if patientDialog}<PatientDialog
     initial={editingPatient ?? undefined}
+    holders={patients.filter((person) => person.tipo === 'TITULAR')}
     onSave={savePatient}
     onCancel={() => {
       patientDialog = false;

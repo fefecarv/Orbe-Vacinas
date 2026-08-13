@@ -1,17 +1,23 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import Card from '../../design-system/components/Card.svelte';
   import Button from '../../design-system/components/Button.svelte';
   import PageHeader from '../../design-system/components/PageHeader.svelte';
   import CollectionPanel from '../../design-system/components/CollectionPanel.svelte';
   import ViewModeToggle from '../../design-system/components/ViewModeToggle.svelte';
-  import { currentPatient } from '../../mocks/patient';
-  import { listHistory, listRecommendations, people } from '../../lib/patientRepository';
+  import { currentUser, patientApi, type ApiApplication } from '../../lib/api';
+  import type { VaccineRecommendation } from '../../lib/patientRepository';
   let { onNavigate }: { onNavigate: (page: string) => void } = $props();
 
-  let selectedPerson = $state(currentPatient.id);
+  const user = currentUser();
+  let people = $state([{ id: String(user?.id ?? ''), name: user?.nome ?? 'Titular', relationship: 'Titular' }]);
+  type HistoryItem = { id: string; vaccine: string; manufacturer: string; dose: string; date: string; batch: string; location: string; professional: string };
+  let selectedPerson = $state(String(user?.id ?? ''));
   let selectedProfile = $derived(people.find((person) => person.id === selectedPerson) ?? people[0]);
-  let history = $derived(listHistory(selectedPerson));
-  let recommendations = $derived(listRecommendations(selectedPerson));
+  let history = $state<HistoryItem[]>([]);
+  let recommendations = $state<VaccineRecommendation[]>([]);
+  let loading = $state(true);
+  let error = $state('');
   let nextRecommendation = $derived(recommendations[0]);
   let walletStatus = $derived(
     recommendations.some((item) => item.status === 'review')
@@ -22,6 +28,41 @@
   );
   let viewMode = $state<'grid' | 'list'>((localStorage.getItem('orbe-view-history') as 'grid' | 'list') ?? 'list');
   $effect(() => localStorage.setItem('orbe-view-history', viewMode));
+  function mapApplication(item: ApiApplication): HistoryItem {
+    return { id: String(item.aplicacaoId), vaccine: item.vacina, manufacturer: item.fabricante,
+      dose: item.dose, date: new Date(item.dataAplicacao).toLocaleDateString('pt-BR'),
+      batch: item.numeroLote, location: item.localAplicacao, professional: item.profissional };
+  }
+  async function loadHistory() {
+    const personId = Number(selectedPerson);
+    if (!personId) return;
+    loading = true; error = '';
+    try {
+      const isHolder = selectedPerson === String(user?.id ?? '');
+      const [applications, apiRecommendations] = await Promise.all([
+        isHolder ? patientApi.applications(personId) : patientApi.applicationsForDependent(personId),
+        patientApi.recommendations(isHolder ? personId : undefined, isHolder ? undefined : personId),
+      ]);
+      history = applications.map(mapApplication);
+      recommendations = apiRecommendations.map((item) => ({
+        id: String(item.id), patientId: selectedPerson, vaccine: item.vacina, dose: item.dose,
+        dueLabel: item.dataPrevista ? `Prevista para ${new Date(`${item.dataPrevista}T12:00:00`).toLocaleDateString('pt-BR')}` : 'Sem data definida',
+        reason: item.motivo,
+        status: item.status === 'AGENDADA' ? 'scheduled' : item.status === 'REVISAR' ? 'review' : 'recommended',
+      }));
+    }
+    catch (exception) { error = exception instanceof Error ? exception.message : 'Não foi possível carregar a carteira.'; }
+    finally { loading = false; }
+  }
+  onMount(async () => {
+    try {
+      const dependents = await patientApi.dependents();
+      people = [people[0], ...dependents.map((item) => ({ id:String(item.id), name:item.nome, relationship:'Dependente' }))];
+    } catch (exception) {
+      error = exception instanceof Error ? exception.message : 'Não foi possível carregar os dependentes.';
+    }
+    await loadHistory();
+  });
 </script>
 
 <div class="page">
@@ -33,7 +74,7 @@
 
   <div class="person-selector" role="tablist" aria-label="Selecionar carteira">
     {#each people as person}
-      <button class:active={selectedPerson === person.id} onclick={() => (selectedPerson = person.id)}>
+      <button class:active={selectedPerson === person.id} onclick={() => { selectedPerson = person.id; void loadHistory(); }}>
         <span>{person.name.slice(0, 1)}</span>
         <b>{person.name}<small>{person.relationship}</small></b>
       </button>
@@ -104,6 +145,8 @@
         <button onclick={() => window.print()}>Imprimir carteira ↓</button>
       </div>
       <div class="timeline {viewMode}">
+        {#if error}<div class="empty"><p>{error}</p></div>{/if}
+        {#if loading}<div class="empty"><p>Carregando carteira vacinal...</p></div>{/if}
         {#each history as item}
           <article>
             <span class="marker">✓</span>
@@ -129,7 +172,7 @@
             <button aria-label={`Imprimir comprovante de ${item.vaccine}`} onclick={() => window.print()}>›</button>
           </article>
         {/each}
-        {#if history.length === 0}<div class="empty">
+        {#if !loading && history.length === 0}<div class="empty">
             <h2>Nenhuma aplicação registrada</h2>
             <p>As vacinas aplicadas aparecerão aqui.</p>
           </div>{/if}

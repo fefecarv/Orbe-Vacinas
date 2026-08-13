@@ -79,14 +79,29 @@ CREATE TABLE lote (
 
 CREATE TABLE convenio (
     convenio_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    usuario_id BIGINT NULL, nome VARCHAR(100) NOT NULL, plano VARCHAR(100) NOT NULL,
-    codigo_operacional VARCHAR(45) NOT NULL, numero_carteirinha VARCHAR(60) NULL,
-    titular VARCHAR(120) NULL, data_validade DATE NULL,
+    nome VARCHAR(100) NOT NULL, plano VARCHAR(100) NOT NULL,
+    codigo_operacional VARCHAR(45) NOT NULL,
     ativo BOOLEAN NOT NULL DEFAULT TRUE,
+    tipo_cobertura ENUM('INTEGRAL','PERCENTUAL','COPARTICIPACAO','SEM_COBERTURA','ANALISE_MANUAL') NOT NULL DEFAULT 'ANALISE_MANUAL',
+    percentual_desconto DECIMAL(5,2) NULL,
+    valor_coparticipacao DECIMAL(10,2) NULL,
     criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_convenio_usuario FOREIGN KEY (usuario_id) REFERENCES usuario(usuario_id),
-    INDEX idx_convenio_usuario (usuario_id)
+    CONSTRAINT ck_convenio_percentual CHECK (percentual_desconto IS NULL OR percentual_desconto BETWEEN 0 AND 100),
+    CONSTRAINT ck_convenio_coparticipacao CHECK (valor_coparticipacao IS NULL OR valor_coparticipacao >= 0),
+    CONSTRAINT uk_convenio_plano UNIQUE (nome, plano)
+);
+
+CREATE TABLE usuario_convenio (
+    usuario_convenio_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id BIGINT NOT NULL, convenio_id BIGINT NOT NULL,
+    numero_carteirinha VARCHAR(60) NOT NULL, titular VARCHAR(120) NOT NULL,
+    data_validade DATE NOT NULL,
+    criado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_usuario_convenio_usuario FOREIGN KEY (usuario_id) REFERENCES usuario(usuario_id),
+    CONSTRAINT fk_usuario_convenio_catalogo FOREIGN KEY (convenio_id) REFERENCES convenio(convenio_id),
+    CONSTRAINT uk_usuario_convenio_carteira UNIQUE (convenio_id, numero_carteirinha)
 );
 
 CREATE TABLE agendamento (
@@ -105,7 +120,7 @@ CREATE TABLE agendamento (
     CONSTRAINT fk_agendamento_usuario FOREIGN KEY (usuario_id) REFERENCES usuario(usuario_id),
     CONSTRAINT fk_agendamento_dependente FOREIGN KEY (dependente_id) REFERENCES dependente(dependente_id),
     CONSTRAINT fk_agendamento_vacina FOREIGN KEY (vacina_id) REFERENCES vacina(vacina_id),
-    CONSTRAINT fk_agendamento_convenio FOREIGN KEY (convenio_id) REFERENCES convenio(convenio_id),
+    CONSTRAINT fk_agendamento_usuario_convenio FOREIGN KEY (convenio_id) REFERENCES usuario_convenio(usuario_convenio_id),
     CONSTRAINT ck_agendamento_paciente CHECK ((usuario_id IS NOT NULL AND dependente_id IS NULL) OR (usuario_id IS NULL AND dependente_id IS NOT NULL)),
     CONSTRAINT ck_agendamento_valor CHECK (valor_estimado IS NULL OR valor_estimado >= 0),
     INDEX idx_agendamento_data_status (data_agendamento, status)

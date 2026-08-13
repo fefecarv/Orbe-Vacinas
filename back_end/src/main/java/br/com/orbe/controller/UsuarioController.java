@@ -32,4 +32,8 @@ public final class UsuarioController {
     public ApiResponse<Usuario> buscar(Long id) {
         return ApiResponse.ok(service.buscar(id));
     }
+
+    public ApiResponse<Usuario> atualizar(Long id, Usuario usuario) {
+        return ApiResponse.ok(service.atualizar(id, usuario));
+    }
 }

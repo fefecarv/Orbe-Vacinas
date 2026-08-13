@@ -2,6 +2,7 @@ package br.com.orbe.controller;
 
 import br.com.orbe.dto.ApiResponse;
 import br.com.orbe.dto.RegistrarAplicacaoRequest;
+import br.com.orbe.dto.CarteiraVacinalItem;
 import br.com.orbe.model.Aplicacao;
 import br.com.orbe.service.AplicacaoService;
 
@@ -19,7 +20,7 @@ public final class AplicacaoController {
         return ApiResponse.criado("Aplicação registrada.", service.registrar(request));
     }
 
-    public ApiResponse<List<Aplicacao>> carteira(
+    public ApiResponse<List<CarteiraVacinalItem>> carteira(
             Long usuarioId,
             Long dependenteId
     ) {

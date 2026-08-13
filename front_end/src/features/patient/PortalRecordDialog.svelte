@@ -8,11 +8,13 @@
     initial = {},
     onSave,
     onCancel,
+    insuranceOptions = [],
   }: {
     type: 'dependent' | 'insurance';
     initial?: Record<string, string>;
     onSave: (values: Record<string, string>) => void;
     onCancel: () => void;
+    insuranceOptions?: Record<string,string>[];
   } = $props();
   let values = $state<Record<string, string>>(untrack(() => ({ ...initial })));
   let error = $state('');
@@ -25,8 +27,6 @@
           ['cpf', 'CPF'],
         ]
       : [
-          ['company', 'Convênio'],
-          ['plan', 'Plano'],
           ['cardNumber', 'Número da carteirinha'],
           ['holder', 'Titular'],
           ['validUntil', 'Validade'],
@@ -35,7 +35,7 @@
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
-    if (fields.some(([key]) => !values[key]?.trim())) {
+    if ((type === 'insurance' && !values.convenioId?.trim()) || fields.some(([key]) => !values[key]?.trim())) {
       error = 'Preencha todos os campos obrigatórios.';
       return;
     }
@@ -55,6 +55,7 @@
       </header>
       {#if error}<div class="error" role="alert">{error}</div>{/if}
       <div class="grid">
+        {#if type === 'insurance'}<label>Plano aceito<select value={values.convenioId ?? ''} onchange={(event)=>(values.convenioId=event.currentTarget.value)} required><option value="">Selecione</option>{#each insuranceOptions as option}<option value={option.id}>{option.label}</option>{/each}</select></label>{/if}
         {#each fields as field}
           <FormField
             id={`portal-${field[0]}`}
@@ -64,13 +65,6 @@
             required
           />
         {/each}
-        <label
-          >Situação<select
-            value={values.active ?? 'true'}
-            onchange={(event) => (values.active = event.currentTarget.value)}
-            ><option value="true">Ativo</option><option value="false">Inativo</option></select
-          ></label
-        >
       </div>
       <footer>
         <Button variant="secondary" onclick={onCancel}>Cancelar</Button><Button type="submit">Salvar</Button>

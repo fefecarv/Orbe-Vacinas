@@ -8,6 +8,14 @@ import java.sql.SQLException;
 
 public final class ConnectionFactory {
 
+    static {
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+        } catch (ClassNotFoundException exception) {
+            throw new ExceptionInInitializerError("Driver JDBC do MySQL nao encontrado.");
+        }
+    }
+
     private final DatabaseConfig config;
 
     public ConnectionFactory(DatabaseConfig config) {

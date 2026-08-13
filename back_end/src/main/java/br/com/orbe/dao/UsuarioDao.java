@@ -9,4 +9,6 @@ public interface UsuarioDao extends GenericDao<Usuario, Long> {
     Optional<Usuario> buscarPorEmail(String email);
 
     Optional<Usuario> buscarPorCpf(String cpf);
+
+    void registrarAcesso(Long usuarioId, String enderecoIp);
 }

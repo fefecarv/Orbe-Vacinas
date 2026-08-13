@@ -6,5 +6,4 @@ import java.util.List;
 
 public interface ConvenioDao extends GenericDao<Convenio, Long> {
 
-    List<Convenio> listarPorUsuario(Long usuarioId);
 }

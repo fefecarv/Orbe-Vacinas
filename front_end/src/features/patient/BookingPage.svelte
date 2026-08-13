@@ -1,24 +1,37 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import Alert from '../../design-system/components/Alert.svelte';
   import Button from '../../design-system/components/Button.svelte';
   import Card from '../../design-system/components/Card.svelte';
   import PageHeader from '../../design-system/components/PageHeader.svelte';
   import Tooltip from '../../design-system/components/Tooltip.svelte';
-  import { currentPatient } from '../../mocks/patient';
-  import { dependents, insurances, vaccines } from '../../mocks/portal';
-  import { createAppointment } from '../../lib/patientRepository';
+  import { currentUser, patientApi, type InsuranceAnalysis } from '../../lib/api';
   let {
     initialVaccine = '',
     onFinish,
     onCancel,
   }: { initialVaccine?: string; onFinish: () => void; onCancel: () => void } = $props();
+  const user = currentUser();
+  const currentPatient = { id: String(user?.id ?? ''), name: user?.nome ?? 'Titular', firstName: user?.nome.split(' ')[0] ?? 'Paciente' };
+  type VaccineOption = { id:string; name:string; manufacturer:string; doses:string; price:number; available:boolean };
+  type DependentOption = { id:string; name:string; relationship:string; age:string };
+  type InsuranceOption = { id:string; company:string; plan:string; cardNumber:string; active:boolean };
+  let vaccines = $state<VaccineOption[]>([]);
+  let dependents = $state<DependentOption[]>([]);
+  let insurances = $state<InsuranceOption[]>([]);
   let step = $state(1);
   let patient = $state(currentPatient.id);
   let vaccine = $state('');
-  let date = $state('2026-07-28');
+  let date = $state(new Date(Date.now() + 86_400_000).toISOString().slice(0, 10));
   let time = $state('09:30');
   let insurance = $state('private');
   let done = $state(false);
+  let loading = $state(true);
+  let submitting = $state(false);
+  let error = $state('');
+  let protocol = $state('');
+  let analysis = $state<InsuranceAnalysis | null>(null);
+  let analyzing = $state(false);
   const steps = ['Paciente e vacina', 'Data e horário', 'Pagamento', 'Revisão'];
   let selectedVaccine = $derived(vaccines.find((v) => v.id === vaccine));
   let canContinue = $derived(
@@ -27,24 +40,55 @@
   $effect(() => {
     if (!vaccine && initialVaccine) vaccine = initialVaccine;
   });
-  function next() {
+  async function next() {
+    if (step === 3 && selectedVaccine) {
+      await analyzeCoverage();
+      if (!analysis) return;
+    }
     if (step < 4) {
       step += 1;
       return;
     }
     if (!selectedVaccine) return;
-    createAppointment({
-      patientId: patient,
-      vaccine: selectedVaccine.name,
-      manufacturer: selectedVaccine.manufacturer,
-      date: date === '2026-07-28' ? '28 de julho de 2026' : date,
-      time,
-      location: 'Unidade Centro · Sala a confirmar',
-      dose: selectedVaccine.doses,
-      status: 'confirmed',
-    });
-    done = true;
+    submitting = true; error = '';
+    try {
+      const isHolder = patient === currentPatient.id;
+      const result = await patientApi.createAppointment({
+        usuarioId: isHolder ? Number(currentPatient.id) : null,
+        dependenteId: isHolder ? null : Number(patient),
+        vacinaId: Number(vaccine),
+        convenioId: insurance === 'private' ? null : Number(insurance),
+        dataAgendamento: `${date}T${time}:00`, unidade: 'Orbe Centro', sala: 'A confirmar',
+        dosePrevista: selectedVaccine.doses,
+        tipoAtendimento: insurance === 'private' ? 'PARTICULAR' : 'CONVENIO',
+        valorEstimado: null,
+      });
+      protocol = result.protocolo; done = true;
+    } catch (exception) {
+      error = exception instanceof Error ? exception.message : 'Não foi possível criar o agendamento.';
+    } finally { submitting = false; }
   }
+  async function analyzeCoverage() {
+    if (!selectedVaccine) return;
+    analyzing = true; error = '';
+    try {
+      analysis = await patientApi.analyzeInsurance(Number(selectedVaccine.id), insurance === 'private' ? undefined : Number(insurance));
+    } catch (exception) {
+      analysis = null;
+      error = exception instanceof Error ? exception.message : 'Não foi possível analisar o convênio.';
+    } finally { analyzing = false; }
+  }
+  onMount(async () => {
+    try {
+      const [apiVaccines, apiDependents, apiInsurances] = await Promise.all([
+        patientApi.vaccines(), patientApi.dependents(), patientApi.insurances(),
+      ]);
+      vaccines = apiVaccines.map((item) => ({ id:String(item.id), name:item.nome, manufacturer:item.fabricante, doses:item.esquemaDoses, price:item.valorBase, available:item.ativo }));
+      dependents = apiDependents.map((item) => ({ id:String(item.id), name:item.nome, relationship:'Dependente', age:new Date(item.dataNascimento).toLocaleDateString('pt-BR') }));
+      insurances = apiInsurances.map((item) => ({ id:String(item.id), company:item.nomeConvenio, plan:item.plano, cardNumber:item.numeroCarteirinha, active:item.ativo }));
+    } catch (exception) { error = exception instanceof Error ? exception.message : 'Não foi possível carregar os dados.'; }
+    finally { loading = false; }
+  });
   function back() {
     if (step > 1) step -= 1;
     else onCancel();
@@ -65,7 +109,7 @@
         ><dl>
           <div>
             <dt>Protocolo</dt>
-            <dd>ORB-2026-0728</dd>
+            <dd>{protocol}</dd>
           </div>
           <div>
             <dt>Vacina</dt>
@@ -73,7 +117,7 @@
           </div>
           <div>
             <dt>Data e horário</dt>
-            <dd>28 de julho de 2026 · {time}</dd>
+            <dd>{new Date(`${date}T${time}:00`).toLocaleDateString('pt-BR')} · {time}</dd>
           </div>
           <div>
             <dt>Paciente</dt>
@@ -97,6 +141,8 @@
         </li>{/each}
     </ol>
     <Card padding="lg">
+      {#if error}<Alert tone="danger">{error}</Alert>{/if}
+      {#if loading}<p>Carregando opções de agendamento...</p>{/if}
       {#if step === 1}<div class="section-title">
           <h2>Quem será vacinado?</h2>
           <Tooltip text="Selecione o titular ou um dependente." />
@@ -126,7 +172,7 @@
           <h2>Selecione a data e o horário</h2>
           <Tooltip text="Horários disponíveis na Unidade Centro." />
         </div>
-        <label class="date-label">Data<input type="date" bind:value={date} min="2026-07-23" /></label>
+        <label class="date-label">Data<input type="date" bind:value={date} min={new Date().toISOString().slice(0, 10)} /></label>
         <div class="times">
           {#each ['08:00', '08:30', '09:00', '09:30', '10:30', '11:00', '14:00', '14:30'] as item}<button
               class:selected={time === item}
@@ -146,7 +192,7 @@
           >{#each insurances.filter((i) => i.active) as item}<label class:selected={insurance === item.id}
               ><input type="radio" bind:group={insurance} value={item.id} /><span
                 ><strong>{item.company}</strong><small>{item.plan} · Final {item.cardNumber.slice(-4)}</small></span
-              ><b>Sujeito à análise</b></label
+              ><b>Análise automática</b></label
             >{/each}
         </div>
       {:else}<div class="section-title">
@@ -167,7 +213,7 @@
             </div>
             <div>
               <dt>Data e horário</dt>
-              <dd>28 de julho de 2026 · {time}</dd>
+              <dd>{new Date(`${date}T${time}:00`).toLocaleDateString('pt-BR')} · {time}</dd>
             </div>
             <div>
               <dt>Unidade</dt>
@@ -180,18 +226,23 @@
             <div>
               <dt>Valor estimado</dt>
               <dd>
-                {insurance === 'private'
-                  ? selectedVaccine?.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-                  : 'Após análise do convênio'}
+                {analyzing ? 'Analisando...' : analysis?.valorPaciente == null
+                  ? analysis?.mensagem ?? 'A calcular'
+                  : analysis.valorPaciente.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
               </dd>
             </div>
+            {#if analysis && insurance !== 'private'}
+              <div><dt>Valor da vacina</dt><dd>{analysis.valorBase.toLocaleString('pt-BR', {style:'currency',currency:'BRL'})}</dd></div>
+              <div><dt>Cobertura do convênio</dt><dd>-{(analysis.valorCoberto ?? 0).toLocaleString('pt-BR', {style:'currency',currency:'BRL'})}</dd></div>
+              <div><dt>Análise automática</dt><dd>{analysis.status} · {analysis.mensagem}</dd></div>
+            {/if}
           </dl>
         </div>
         <Alert>Ao confirmar, você declara que os dados informados estão corretos.</Alert>{/if}
       <footer>
         <Button variant="secondary" onclick={back}>{step === 1 ? 'Cancelar' : 'Voltar'}</Button><Button
           onclick={next}
-          disabled={!canContinue}>{step === 4 ? 'Confirmar agendamento' : 'Continuar'}</Button
+          disabled={!canContinue || loading || submitting}>{submitting ? 'Confirmando...' : step === 4 ? 'Confirmar agendamento' : 'Continuar'}</Button
         >
       </footer></Card
     >{/if}
