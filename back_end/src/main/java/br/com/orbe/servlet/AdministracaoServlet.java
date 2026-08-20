@@ -1,9 +1,181 @@
 package br.com.orbe.servlet;
-import br.com.orbe.config.ApplicationContextListener;import br.com.orbe.dto.ApiResponse;import br.com.orbe.model.*;import br.com.orbe.service.AdministracaoService;import br.com.orbe.util.JsonUtil;import jakarta.servlet.ServletException;import jakarta.servlet.annotation.WebServlet;import jakarta.servlet.http.*;import java.io.IOException;
-@WebServlet("/api/admin/*") public class AdministracaoServlet extends BaseServlet {
- private AdministracaoService service;public void init()throws ServletException{service=(AdministracaoService)getServletContext().getAttribute(ApplicationContextListener.ADMINISTRACAO_SERVICE);}
- protected void doGet(HttpServletRequest q,HttpServletResponse s)throws IOException{try{Object d=switch(recurso(q)){case"usuarios"->service.listarUsuarios();case"vacinas"->service.listarVacinas();case"lotes"->service.listarLotes();case"convenios"->service.listarConvenios();case"movimentacoes"->service.listarMovimentacoes();case"auditoria"->service.listarAuditoria();case"horarios"->service.listarHorarios();case"bloqueios"->service.listarBloqueios();case"relatorio"->service.relatorio(java.time.LocalDate.parse(q.getParameter("inicio")),java.time.LocalDate.parse(q.getParameter("fim")));default->throw new IllegalArgumentException("Recurso inválido.");};json(s,200,ApiResponse.ok(d));}catch(Exception e){handleException(s,e);}}
- protected void doPost(HttpServletRequest q,HttpServletResponse s)throws IOException{salvar(q,s,false);}protected void doPut(HttpServletRequest q,HttpServletResponse s)throws IOException{salvar(q,s,true);}
- private void salvar(HttpServletRequest q,HttpServletResponse s,boolean edit)throws IOException{try{Object result;if("lotes".equals(recurso(q))){Lote x=JsonUtil.mapper().readValue(q.getReader(),Lote.class);if(edit)x.setId(id(q));result=service.salvarLote(x);}else if("convenios".equals(recurso(q))){Convenio x=JsonUtil.mapper().readValue(q.getReader(),Convenio.class);if(edit)x.setId(id(q));result=service.salvarConvenio(x);}else if("horarios".equals(recurso(q))){result=service.salvarHorario(JsonUtil.mapper().readValue(q.getReader(),ConfiguracaoAgenda.class));}else if("bloqueios".equals(recurso(q))){result=service.salvarBloqueio(JsonUtil.mapper().readValue(q.getReader(),BloqueioAgenda.class));}else throw new IllegalArgumentException("Operação inválida.");Auditoria log=new Auditoria();var user=AutenticacaoServlet.usuarioDaSessao(q);log.setUsuarioId(user==null?null:user.getId());log.setAcao(edit?"ATUALIZAR":"CRIAR");log.setEntidade(recurso(q).toUpperCase());log.setEntidadeId(result instanceof Lote x?String.valueOf(x.getId()):result instanceof Convenio x?String.valueOf(x.getId()):"CONFIGURACAO");log.setDescricao((edit?"Atualização":"Cadastro")+" realizado no módulo administrativo.");log.setIp(q.getRemoteAddr());service.registrarAuditoria(log);json(s,edit?200:201,edit?ApiResponse.ok(result):ApiResponse.criado("Registro cadastrado.",result));}catch(Exception e){handleException(s,e);}}
- private String recurso(HttpServletRequest q){String[]x=q.getPathInfo()==null?new String[0]:q.getPathInfo().substring(1).split("/");return x.length==0?"":x[0];}private Long id(HttpServletRequest q){String[]x=q.getPathInfo().substring(1).split("/");if(x.length<2)throw new IllegalArgumentException("Identificador obrigatório.");return Long.valueOf(x[1]);}
+
+import br.com.orbe.config.ApplicationContextListener;
+import br.com.orbe.dto.ApiResponse;
+import br.com.orbe.model.Auditoria;
+import br.com.orbe.model.BloqueioAgenda;
+import br.com.orbe.model.ConfiguracaoAgenda;
+import br.com.orbe.model.Convenio;
+import br.com.orbe.model.Lote;
+import br.com.orbe.service.AdministracaoService;
+import br.com.orbe.util.JsonUtil;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.annotation.WebServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
+import java.io.IOException;
+import java.time.LocalDate;
+
+@WebServlet("/api/admin/*")
+public class AdministracaoServlet extends BaseServlet {
+
+    private AdministracaoService service;
+
+    @Override
+    public void init() throws ServletException {
+        service = (AdministracaoService) getServletContext().getAttribute(
+                ApplicationContextListener.ADMINISTRACAO_SERVICE
+        );
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        try {
+            Object dados = switch (recurso(request)) {
+                case "usuarios" -> service.listarUsuarios();
+                case "vacinas" -> service.listarVacinas();
+                case "lotes" -> service.listarLotes();
+                case "convenios" -> service.listarConvenios();
+                case "movimentacoes" -> service.listarMovimentacoes();
+                case "auditoria" -> service.listarAuditoria();
+                case "horarios" -> service.listarHorarios();
+                case "bloqueios" -> service.listarBloqueios();
+                case "relatorio" -> service.relatorio(
+                        LocalDate.parse(request.getParameter("inicio")),
+                        LocalDate.parse(request.getParameter("fim"))
+                );
+                default -> throw new IllegalArgumentException("Recurso inválido.");
+            };
+
+            json(response, HttpServletResponse.SC_OK, ApiResponse.ok(dados));
+        } catch (Exception exception) {
+            handleException(response, exception);
+        }
+    }
+
+    @Override
+    protected void doPost(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        salvar(request, response, false);
+    }
+
+    @Override
+    protected void doPut(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        salvar(request, response, true);
+    }
+
+    private void salvar(
+            HttpServletRequest request,
+            HttpServletResponse response,
+            boolean edicao
+    ) throws IOException {
+        try {
+            String recurso = recurso(request);
+            Object resultado = salvarRecurso(request, recurso, edicao);
+            registrarAuditoria(request, recurso, resultado, edicao);
+
+            if (edicao) {
+                json(response, HttpServletResponse.SC_OK, ApiResponse.ok(resultado));
+            } else {
+                json(
+                        response,
+                        HttpServletResponse.SC_CREATED,
+                        ApiResponse.criado("Registro cadastrado.", resultado)
+                );
+            }
+        } catch (Exception exception) {
+            handleException(response, exception);
+        }
+    }
+
+    private Object salvarRecurso(
+            HttpServletRequest request,
+            String recurso,
+            boolean edicao
+    ) throws IOException {
+        return switch (recurso) {
+            case "lotes" -> salvarLote(request, edicao);
+            case "convenios" -> salvarConvenio(request, edicao);
+            case "horarios" -> service.salvarHorario(
+                    JsonUtil.mapper().readValue(request.getReader(), ConfiguracaoAgenda.class)
+            );
+            case "bloqueios" -> service.salvarBloqueio(
+                    JsonUtil.mapper().readValue(request.getReader(), BloqueioAgenda.class)
+            );
+            default -> throw new IllegalArgumentException("Operação inválida.");
+        };
+    }
+
+    private Lote salvarLote(HttpServletRequest request, boolean edicao)
+            throws IOException {
+        Lote lote = JsonUtil.mapper().readValue(request.getReader(), Lote.class);
+        if (edicao) {
+            lote.setId(id(request));
+        }
+        return service.salvarLote(lote);
+    }
+
+    private Convenio salvarConvenio(HttpServletRequest request, boolean edicao)
+            throws IOException {
+        Convenio convenio = JsonUtil.mapper().readValue(request.getReader(), Convenio.class);
+        if (edicao) {
+            convenio.setId(id(request));
+        }
+        return service.salvarConvenio(convenio);
+    }
+
+    private void registrarAuditoria(
+            HttpServletRequest request,
+            String recurso,
+            Object resultado,
+            boolean edicao
+    ) {
+        var usuario = AutenticacaoServlet.usuarioDaSessao(request);
+
+        Auditoria auditoria = new Auditoria();
+        auditoria.setUsuarioId(usuario == null ? null : usuario.getId());
+        auditoria.setAcao(edicao ? "ATUALIZAR" : "CRIAR");
+        auditoria.setEntidade(recurso.toUpperCase());
+        auditoria.setEntidadeId(identificadorAuditoria(resultado));
+        auditoria.setDescricao(
+                (edicao ? "Atualização" : "Cadastro")
+                        + " realizado no módulo administrativo."
+        );
+        auditoria.setIp(request.getRemoteAddr());
+        service.registrarAuditoria(auditoria);
+    }
+
+    private String identificadorAuditoria(Object resultado) {
+        if (resultado instanceof Lote lote) {
+            return String.valueOf(lote.getId());
+        }
+        if (resultado instanceof Convenio convenio) {
+            return String.valueOf(convenio.getId());
+        }
+        return "CONFIGURACAO";
+    }
+
+    private String recurso(HttpServletRequest request) {
+        String path = request.getPathInfo();
+        if (path == null || path.length() <= 1) {
+            return "";
+        }
+        return path.substring(1).split("/")[0];
+    }
+
+    private Long id(HttpServletRequest request) {
+        String path = request.getPathInfo();
+        if (path == null) {
+            throw new IllegalArgumentException("Identificador obrigatório.");
+        }
+
+        String[] partes = path.substring(1).split("/");
+        if (partes.length < 2) {
+            throw new IllegalArgumentException("Identificador obrigatório.");
+        }
+        return Long.valueOf(partes[1]);
+    }
 }
