@@ -70,6 +70,7 @@ public class ApplicationContextListener implements ServletContextListener {
         ConvenioDaoJdbc convenioDao = new ConvenioDaoJdbc(connectionFactory);
         UsuarioConvenioDaoJdbc usuarioConvenioDao = new UsuarioConvenioDaoJdbc(connectionFactory);
         AgendamentoDaoJdbc agendamentoDao = new AgendamentoDaoJdbc(connectionFactory);
+        br.com.orbe.dao.jdbc.ConfiguracaoAgendaDaoJdbc configuracaoAgendaDao = new br.com.orbe.dao.jdbc.ConfiguracaoAgendaDaoJdbc(connectionFactory);
 
         CatalogoService catalogoService = new CatalogoServiceImpl(vacinaDao, loteDao);
         UsuarioService usuarioService = new UsuarioServiceImpl(
@@ -83,7 +84,8 @@ public class ApplicationContextListener implements ServletContextListener {
                 vacinaDao,
                 new AgendaDiariaDaoJdbc(connectionFactory),
                 convenioDao,
-                usuarioConvenioDao
+                usuarioConvenioDao,
+                configuracaoAgendaDao
         );
         AplicacaoService aplicacaoService = new AplicacaoServiceImpl(
                 new AplicacaoTransacaoDaoJdbc(connectionFactory),
@@ -107,10 +109,11 @@ public class ApplicationContextListener implements ServletContextListener {
                 new PacienteDaoJdbc(connectionFactory), usuarioService
         );
         AdministracaoService administracaoService = new AdministracaoServiceImpl(
-                new UsuarioAdministrativoDaoJdbc(connectionFactory), loteDao, convenioDao,
+                new UsuarioAdministrativoDaoJdbc(connectionFactory), loteDao, vacinaDao, convenioDao,
                 new MovimentacaoEstoqueDaoJdbc(connectionFactory),
                 new AuditoriaDaoJdbc(connectionFactory),
-                new RelatorioGerencialDaoJdbc(connectionFactory)
+                new RelatorioGerencialDaoJdbc(connectionFactory),
+                configuracaoAgendaDao
         );
         AdminBootstrapService adminBootstrapService = new AdminBootstrapServiceImpl(
                 usuarioService,

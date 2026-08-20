@@ -34,6 +34,7 @@ public class AgendamentoServiceImpl implements AgendamentoService {
     private final AgendaDiariaDaoJdbc agendaDiariaDao;
     private final ConvenioDao convenioDao;
     private final UsuarioConvenioDaoJdbc usuarioConvenioDao;
+    private final br.com.orbe.dao.jdbc.ConfiguracaoAgendaDaoJdbc configuracaoAgendaDao;
 
     public AgendamentoServiceImpl(
             AgendamentoDao agendamentoDao,
@@ -42,7 +43,8 @@ public class AgendamentoServiceImpl implements AgendamentoService {
             VacinaDao vacinaDao,
             AgendaDiariaDaoJdbc agendaDiariaDao,
             ConvenioDao convenioDao,
-            UsuarioConvenioDaoJdbc usuarioConvenioDao
+            UsuarioConvenioDaoJdbc usuarioConvenioDao,
+            br.com.orbe.dao.jdbc.ConfiguracaoAgendaDaoJdbc configuracaoAgendaDao
     ) {
         this.agendamentoDao = agendamentoDao;
         this.usuarioDao = usuarioDao;
@@ -51,6 +53,7 @@ public class AgendamentoServiceImpl implements AgendamentoService {
         this.agendaDiariaDao = agendaDiariaDao;
         this.convenioDao = convenioDao;
         this.usuarioConvenioDao = usuarioConvenioDao;
+        this.configuracaoAgendaDao = configuracaoAgendaDao;
     }
 
     @Override
@@ -59,10 +62,16 @@ public class AgendamentoServiceImpl implements AgendamentoService {
             throw new BusinessException("Os dados do agendamento sao obrigatorios.");
         }
         validarPaciente(request.usuarioId(), request.dependenteId());
-        vacinaDao.buscarPorId(request.vacinaId())
+        var vacina = vacinaDao.buscarPorId(request.vacinaId())
                 .orElseThrow(() -> new NotFoundException("Vacina não encontrada."));
+        var nascimento=request.usuarioId()!=null?usuarioDao.buscarPorId(request.usuarioId()).orElseThrow().getDataNascimento():dependenteDao.buscarPorId(request.dependenteId()).orElseThrow().getDataNascimento();
+        long idadeMeses=java.time.temporal.ChronoUnit.MONTHS.between(nascimento,LocalDate.now());
+        if(idadeMeses<vacina.getIdadeMinimaMeses()||(vacina.getIdadeMaximaMeses()!=null&&idadeMeses>vacina.getIdadeMaximaMeses()))throw new BusinessException("Esta vacina não é indicada para a idade da pessoa selecionada.");
         if (request.dataAgendamento() == null || request.dataAgendamento().isBefore(LocalDateTime.now())) {
             throw new BusinessException("A data do agendamento deve ser futura.");
+        }
+        if (!horariosDisponiveis(request.dataAgendamento().toLocalDate(), request.unidade()).contains(request.dataAgendamento().toLocalTime())) {
+            throw new BusinessException("O horário selecionado não está disponível para esta unidade.");
         }
         if (request.tipoAtendimento() == TipoAtendimento.CONVENIO && request.convenioId() == null) {
             throw new BusinessException("Selecione um convênio para esse atendimento.");
@@ -132,9 +141,9 @@ public class AgendamentoServiceImpl implements AgendamentoService {
 
     @Override
     public Agendamento cancelar(Long id, String motivo) {
-        Agendamento agendamento = obter(id);
-        if (agendamento.getStatus() == StatusAgendamento.CONCLUIDO) {
-            throw new BusinessException("Um atendimento concluído não pode ser cancelado.");
+        Agendamento agendamento = normalizarVencido(obter(id));
+        if (!podeSerGerenciado(agendamento)) {
+            throw new BusinessException("Somente agendamentos futuros pendentes ou confirmados podem ser cancelados.");
         }
         if (motivo == null || motivo.isBlank()) {
             throw new BusinessException("Informe o motivo do cancelamento.");
@@ -147,12 +156,12 @@ public class AgendamentoServiceImpl implements AgendamentoService {
 
     @Override
     public Agendamento reagendar(Long id, LocalDateTime novaData) {
-        Agendamento agendamento = obter(id);
+        Agendamento agendamento = normalizarVencido(obter(id));
         if (novaData == null || novaData.isBefore(LocalDateTime.now())) {
             throw new BusinessException("A nova data deve ser futura.");
         }
-        if (agendamento.getStatus() == StatusAgendamento.CONCLUIDO) {
-            throw new BusinessException("Um atendimento concluído não pode ser reagendado.");
+        if (!podeSerGerenciado(agendamento)) {
+            throw new BusinessException("Somente agendamentos futuros pendentes ou confirmados podem ser reagendados.");
         }
         agendamento.setDataAgendamento(novaData);
         agendamento.setStatus(StatusAgendamento.CONFIRMADO);
@@ -172,9 +181,11 @@ public class AgendamentoServiceImpl implements AgendamentoService {
     @Override
     public List<Agendamento> listarPaciente(Long usuarioId, Long dependenteId) {
         validarPaciente(usuarioId, dependenteId);
-        return usuarioId != null
+        List<Agendamento> agendamentos = usuarioId != null
                 ? agendamentoDao.listarPorUsuario(usuarioId)
                 : agendamentoDao.listarPorDependente(dependenteId);
+        agendamentos.replaceAll(this::normalizarVencido);
+        return agendamentos;
     }
 
     @Override
@@ -182,6 +193,8 @@ public class AgendamentoServiceImpl implements AgendamentoService {
         if (data == null) throw new BusinessException("A data da agenda é obrigatória.");
         return agendaDiariaDao.listar(data);
     }
+
+    @Override public List<java.time.LocalTime> horariosDisponiveis(LocalDate data,String unidade){if(data==null||data.isBefore(LocalDate.now()))return List.of();return configuracaoAgendaDao.horarios(data,unidade==null||unidade.isBlank()?"Orbe Centro":unidade).stream().filter(h->data.isAfter(LocalDate.now())||h.isAfter(java.time.LocalTime.now())).toList();}
 
     @Override
     public Agendamento atualizarStatus(Long id, StatusAgendamento novoStatus) {
@@ -199,6 +212,22 @@ public class AgendamentoServiceImpl implements AgendamentoService {
     private Agendamento obter(Long id) {
         return agendamentoDao.buscarPorId(id)
                 .orElseThrow(() -> new NotFoundException("Agendamento não encontrado."));
+    }
+
+    private Agendamento normalizarVencido(Agendamento agendamento) {
+        boolean aguardando = agendamento.getStatus() == StatusAgendamento.PENDENTE
+                || agendamento.getStatus() == StatusAgendamento.CONFIRMADO;
+        if (aguardando && agendamento.getDataAgendamento().isBefore(LocalDateTime.now())) {
+            agendamento.setStatus(StatusAgendamento.FALTOU);
+            return agendamentoDao.atualizar(agendamento);
+        }
+        return agendamento;
+    }
+
+    private boolean podeSerGerenciado(Agendamento agendamento) {
+        return agendamento.getDataAgendamento().isAfter(LocalDateTime.now())
+                && (agendamento.getStatus() == StatusAgendamento.PENDENTE
+                || agendamento.getStatus() == StatusAgendamento.CONFIRMADO);
     }
 
     private void validarPaciente(Long usuarioId, Long dependenteId) {

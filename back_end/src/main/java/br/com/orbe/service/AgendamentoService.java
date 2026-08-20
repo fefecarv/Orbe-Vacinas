@@ -8,6 +8,7 @@ import br.com.orbe.model.Agendamento;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 
 public interface AgendamentoService {
@@ -29,4 +30,5 @@ public interface AgendamentoService {
     List<AgendaDiariaItem> listarAgendaDetalhada(LocalDate data);
 
     Agendamento atualizarStatus(Long id, StatusAgendamento status);
+    List<LocalTime> horariosDisponiveis(LocalDate data, String unidade);
 }

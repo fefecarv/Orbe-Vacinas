@@ -56,6 +56,7 @@ public class AutenticacaoServlet extends BaseServlet {
             json(response, HttpServletResponse.SC_OK, ApiResponse.ok(null));
             return;
         }
+        if("alterar-senha".equals(action)){try{UsuarioAutenticado u=usuarioDaSessao(request);var body=JsonUtil.mapper().readTree(request.getReader());service.alterarSenha(u.getId(),body.path("senhaAtual").asText(),body.path("novaSenha").asText());u.setTrocaSenhaObrigatoria(false);json(response,HttpServletResponse.SC_OK,ApiResponse.ok(null));}catch(Exception e){handleException(response,e);}return;}
         if (!"login".equals(action)) {
             error(response, HttpServletResponse.SC_NOT_FOUND, "Rota de autenticacao inexistente.");
             return;

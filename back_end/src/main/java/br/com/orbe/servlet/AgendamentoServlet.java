@@ -42,6 +42,10 @@ public class AgendamentoServlet extends BaseServlet {
     protected void doGet(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
         try {
+            if ("horarios".equals(pathActionName(request))) {
+                var data=LocalDate.parse(request.getParameter("data"));var unidade=request.getParameter("unidade");
+                json(response,HttpServletResponse.SC_OK,br.com.orbe.dto.ApiResponse.ok(service.horariosDisponiveis(data,unidade)));return;
+            }
             if ("analise-convenio".equals(pathActionName(request))) {
                 Long vacinaId = optionalLongParameter(request, "vacinaId");
                 Long convenioId = optionalLongParameter(request, "convenioId");

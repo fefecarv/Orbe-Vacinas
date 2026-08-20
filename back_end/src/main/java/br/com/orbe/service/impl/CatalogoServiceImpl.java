@@ -30,6 +30,12 @@ public class CatalogoServiceImpl implements CatalogoService {
         if (vacina.getNome() == null || vacina.getNome().isBlank()) {
             throw new BusinessException("O nome da vacina é obrigatório.");
         }
+        if(vacina.getCategoria()==null||vacina.getCategoria().isBlank()||vacina.getFabricante()==null||vacina.getFabricante().isBlank())throw new BusinessException("Fabricante e categoria são obrigatórios.");
+        if(vacina.getIdadeMinimaMeses()<0||vacina.getNumeroDoses()<1)throw new BusinessException("Idade mínima e número de doses inválidos.");
+        if(vacina.getId()==null)vacina.setAtivo(true);
+        if(vacina.getCategoria()==null||vacina.getCategoria().isBlank()||vacina.getFabricante()==null||vacina.getFabricante().isBlank())throw new BusinessException("Fabricante e categoria são obrigatórios.");
+        if(vacina.getIdadeMinimaMeses()<0||vacina.getNumeroDoses()<1)throw new BusinessException("Idade mínima e número de doses inválidos.");
+        if(vacina.getId()==null)vacina.setAtivo(true);
         return vacina.getId() == null
                 ? vacinaDao.salvar(vacina)
                 : vacinaDao.atualizar(vacina);
