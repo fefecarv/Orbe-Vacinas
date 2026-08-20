@@ -9,11 +9,13 @@
     initial = {},
     onSave,
     onCancel,
+    vaccineOptions = [],
   }: {
     entity: Entity;
     initial?: Record<string, string>;
     onSave: (values: Record<string, string>) => void;
     onCancel: () => void;
+    vaccineOptions?: string[];
   } = $props();
 
   const configs = {
@@ -21,12 +23,15 @@
       title: 'Vacina',
       fields: [
         ['name', 'Nome da vacina', 'text'],
-        ['manufacturer', 'Fabricante', 'text'],
+        ['manufacturer', 'Fabricante', 'manufacturer'],
         ['description', 'Descrição', 'text'],
-        ['category', 'Categoria', 'text'],
-        ['age', 'Indicação', 'text'],
-        ['doses', 'Esquema de doses', 'text'],
-        ['price', 'Valor-base', 'text'],
+        ['category', 'Categoria', 'category'],
+        ['ageMin', 'Idade mínima (meses)', 'number'],
+        ['ageMax', 'Idade máxima (opcional)', 'optionalNumber'],
+        ['doseCount', 'Quantidade de doses', 'number'],
+        ['intervalDays', 'Intervalo entre doses (dias)', 'optionalNumber'],
+        ['boosterMonths', 'Reforço periódico (meses)', 'optionalNumber'],
+        ['price', 'Valor-base', 'money'],
         ['status', 'Situação', 'status'],
       ],
     },
@@ -34,9 +39,9 @@
       title: 'Lote',
       fields: [
         ['number', 'Número do lote', 'text'],
-        ['vaccine', 'Vacina', 'text'],
-        ['expires', 'Validade', 'text'],
-        ['quantity', 'Quantidade', 'text'],
+        ['vaccine', 'Vacina', 'vaccine'],
+        ['expires', 'Validade', 'date'],
+        ['quantity', 'Quantidade', 'number'],
         ['supplier', 'Fornecedor', 'text'],
         ['status', 'Situação', 'batchStatus'],
       ],
@@ -48,8 +53,8 @@
         ['plan', 'Plano', 'text'],
         ['code', 'Código operacional', 'text'],
         ['coverageType', 'Tipo de cobertura', 'coverageType'],
-        ['discount', 'Percentual de desconto', 'optional'],
-        ['copay', 'Valor da coparticipação', 'optional'],
+        ['discount', 'Percentual de desconto', 'percentage'],
+        ['copay', 'Valor da coparticipação', 'moneyOptional'],
         ['status', 'Situação', 'status'],
       ],
     },
@@ -74,7 +79,7 @@
     const required = isUser
       ? ['name', 'cpf', 'email', 'phone', 'birth', 'role', 'status', ...(editing ? [] : ['password'])]
       : configs[entity as Exclude<Entity, 'user'>].fields
-          .filter((field) => !['status', 'discount', 'copay'].includes(field[0]))
+          .filter((field) => !['status', 'discount', 'copay', 'ageMax', 'intervalDays', 'boosterMonths'].includes(field[0]))
           .map((field) => field[0]);
     if (required.some((field) => !values[field]?.trim())) {
       error = 'Preencha todos os campos obrigatórios.';
@@ -227,31 +232,36 @@
         <div class="fields">
           {#each configs[entity as Exclude<Entity, 'user'>].fields as field}
             {#if field[2] === 'status'}
-              <label
+              {#if editing}<label
                 >{field[1]}<select
                   value={values[field[0]] ?? 'Ativo'}
                   onchange={(e) => (values[field[0]] = e.currentTarget.value)}
                   ><option>Ativo</option><option>Inativo</option></select
                 ></label
-              >
+              >{/if}
             {:else if field[2] === 'batchStatus'}
-              <label
+              {#if editing}<label
                 >{field[1]}<select
                   value={values[field[0]] ?? 'Regular'}
                   onchange={(e) => (values[field[0]] = e.currentTarget.value)}
                   ><option>Regular</option><option>Atenção</option><option>Crítico</option><option>Inativo</option
                   ></select
                 ></label
-              >
+              >{/if}
             {:else if field[2] === 'coverageType'}
               <label>{field[1]}<select value={values[field[0]] ?? 'ANALISE_MANUAL'} onchange={(e) => (values[field[0]] = e.currentTarget.value)}><option value="INTEGRAL">Cobertura integral</option><option value="PERCENTUAL">Desconto percentual</option><option value="COPARTICIPACAO">Coparticipação fixa</option><option value="SEM_COBERTURA">Sem cobertura</option><option value="ANALISE_MANUAL">Análise manual</option></select></label>
+            {:else if field[2] === 'category'}<label>{field[1]}<select bind:value={values[field[0]]}><option>Infantil</option><option>Adulto</option><option>Idoso</option><option>Gestante</option><option>Respiratória</option><option>Ocupacional</option><option>Viagem</option></select></label>
+            {:else if field[2] === 'manufacturer'}<label>{field[1]}<select bind:value={values[field[0]]}><option>Sanofi Pasteur</option><option>Pfizer</option><option>GSK</option><option>Butantan</option><option>Fiocruz</option><option>Moderna</option></select></label>
+            {:else if field[2] === 'vaccine'}<label>{field[1]}<select bind:value={values[field[0]]}><option value="">Selecione uma vacina</option>{#each vaccineOptions as option}<option>{option}</option>{/each}</select></label>
+            {:else if ['number','optionalNumber','money','moneyOptional','percentage','date'].includes(field[2])}
+              <label>{field[1]}<input type={field[2]==='date'?'date':'number'} min={field[2]==='percentage'||field[2]==='number'?'0':undefined} max={field[2]==='percentage'?'100':undefined} step={field[2].includes('money')?'0.01':'1'} required={!field[2].toLowerCase().includes('optional')} bind:value={values[field[0]]}/></label>
             {:else}
               <FormField
                 id={`crud-${field[0]}`}
                 label={field[1]}
                 value={values[field[0]] ?? ''}
                 oninput={(v) => (values[field[0]] = v)}
-                required={field[2] !== 'optional'}
+                required
               />
             {/if}
           {/each}
@@ -358,6 +368,7 @@
     padding: 0 var(--space-3);
     color: var(--text-primary);
   }
+  input { min-height:2.875rem;border:1px solid var(--border-strong);border-radius:var(--radius-md);background:var(--surface-card);padding:0 var(--space-3);color:var(--text-primary); }
   .access-summary {
     display: flex;
     align-items: center;

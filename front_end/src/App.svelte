@@ -13,11 +13,12 @@
   import BookingPage from './features/patient/BookingPage.svelte';
   import EmployeePage from './features/employee/EmployeePage.svelte';
   import AdminPage from './features/admin/AdminPage.svelte';
+  import AdminSchedulePage from './features/admin/AdminSchedulePage.svelte';
   import PlaceholderPage from './features/shared/PlaceholderPage.svelte';
   import SecurityHelpPage from './features/shared/SecurityHelpPage.svelte';
   import ConfirmDialog from './design-system/components/ConfirmDialog.svelte';
   import { isKnownPage, pageFromPath, pagePaths, pathAllowedForRole, roleFromPath, type UserRole } from './lib/navigation';
-  import { authApi, roleFromUser } from './lib/api';
+  import { authApi, roleFromUser, currentUser } from './lib/api';
   let activePage = $state(pageFromPath(location.pathname));
   let authenticated = $state(false);
   let authChecking = $state(true);
@@ -43,7 +44,7 @@
     role = selectedRole;
     authenticated = true;
     localStorage.setItem('orbe-session-role', selectedRole);
-    navigate(selectedRole === 'admin' ? 'admin-dashboard' : selectedRole === 'employee' ? 'staff-dashboard' : 'home', true);
+    navigate(currentUser()?.trocaSenhaObrigatoria ? 'security' : selectedRole === 'admin' ? 'admin-dashboard' : selectedRole === 'employee' ? 'staff-dashboard' : 'home', true);
   }
 
   async function logout() {
@@ -115,6 +116,7 @@
     {:else if activePage === 'admin-vaccines'}<AdminPage mode="vaccines" onNavigate={navigate}/>
     {:else if activePage === 'admin-stock'}<AdminPage mode="stock" onNavigate={navigate}/>
     {:else if activePage === 'admin-insurance'}<AdminPage mode="insurance" onNavigate={navigate}/>
+    {:else if activePage === 'admin-schedule'}<AdminSchedulePage />
     {:else if activePage === 'admin-reports'}<AdminPage mode="reports" onNavigate={navigate}/>
     {:else if activePage === 'admin-audit'}<AdminPage mode="audit" onNavigate={navigate}/>
     {:else if activePage === 'security'}<SecurityHelpPage mode="security" />

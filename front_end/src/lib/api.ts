@@ -16,6 +16,7 @@ export type AuthenticatedUser = {
   email: string;
   perfis: Array<'PACIENTE' | 'FUNCIONARIO' | 'ADMINISTRADOR'>;
   csrfToken: string;
+  trocaSenhaObrigatoria:boolean;
 };
 
 export type PatientRegistration = {
@@ -77,6 +78,7 @@ export const authApi = {
       authenticatedUser = null;
     }
   },
+  changePassword(senhaAtual:string,novaSenha:string){return request<null>('/auth/alterar-senha',{method:'POST',body:JSON.stringify({senhaAtual,novaSenha})});},
 
   register(data: PatientRegistration) {
     return request('/usuarios', {
@@ -105,6 +107,7 @@ export type ApiVaccine = {
   esquemaDoses: string;
   valorBase: number;
   ativo: boolean;
+  idadeMinimaMeses:number; idadeMaximaMeses:number|null; numeroDoses:number; intervaloDias:number|null; reforcoMeses:number|null;
 };
 
 export type ApiAppointment = {
@@ -252,6 +255,7 @@ export const patientApi = {
       body: JSON.stringify({ novaData }),
     });
   },
+  availableTimes(data:string, unidade='Orbe Centro') { return request<string[]>(`/agendamentos/horarios?data=${data}&unidade=${encodeURIComponent(unidade)}`); },
 };
 
 export function currentUser() {
@@ -298,10 +302,11 @@ export const staffApi = {
 export type ApiLot = { id:number;vacinaId:number;numeroLote:string;dataValidade:string;quantidadeInicial:number;quantidadeAtual:number;fornecedor:string;status:string };
 export type ApiAdminUser = { id:number;nome:string;cpf:string;email:string;telefone:string;dataNascimento:string;status:string;perfil:'PACIENTE'|'FUNCIONARIO'|'ADMINISTRADOR';matricula:string|null;ultimoAcessoEm:string|null };
 export type ApiAdminInsurance = { id:number;nome:string;plano:string;codigoOperacional:string;ativo:boolean;tipoCobertura:string;percentualDesconto:number|null;valorCoparticipacao:number|null };
-export type ManagementReport={pacientesAtivos:number;aplicacoesPeriodo:number;dosesEstoque:number;lotesAlerta:number;agendamentosTotal:number;concluidos:number;faltas:number;cancelados:number;dosesPerdidas:number;receita:number;aplicacoesPorSemana:Array<{periodo:string;quantidade:number}>;vacinasMaisAplicadas:Array<{vacina:string;quantidade:number}>;alertas:Array<{lote:string;vacina:string;tipo:string;quantidade:number;validade:string}>};
+export type ManagementReport={pacientesAtivos:number;aplicacoesPeriodo:number;dosesEstoque:number;lotesAlerta:number;agendamentosTotal:number;concluidos:number;faltas:number;cancelados:number;dosesPerdidas:number;receita:number;aplicacoesPorSemana:Array<{periodo:string;quantidade:number}>;vacinasMaisAplicadas:Array<{vacina:string;quantidade:number}>;profissionaisMaisAtivos:Array<{vacina:string;quantidade:number}>;alertas:Array<{lote:string;vacina:string;tipo:string;quantidade:number;validade:string}>};
 
 export const adminApi = {
   users:()=>request<ApiAdminUser[]>('/admin/usuarios'),
+  vaccines:()=>request<ApiVaccine[]>('/admin/vacinas'),
   lots:()=>request<ApiLot[]>('/admin/lotes'),
   insurances:()=>request<ApiAdminInsurance[]>('/admin/convenios'),
   movements:()=>request<Record<string,unknown>[]>('/admin/movimentacoes'),
@@ -309,8 +314,12 @@ export const adminApi = {
   saveVaccine:(data:Partial<ApiVaccine>)=>request<ApiVaccine>('/vacinas',{method:data.id?'PUT':'POST',body:JSON.stringify(data)}),
   saveLot:(data:Partial<ApiLot>)=>request<ApiLot>(data.id?`/admin/lotes/${data.id}`:'/admin/lotes',{method:data.id?'PUT':'POST',body:JSON.stringify(data)}),
   saveInsurance:(data:Partial<ApiAdminInsurance>)=>request<ApiAdminInsurance>(data.id?`/admin/convenios/${data.id}`:'/admin/convenios',{method:data.id?'PUT':'POST',body:JSON.stringify(data)}),
-  createUser:(data:{nome:string;cpf:string;email:string;telefone:string;dataNascimento:string;senha:string;perfil:string;matricula?:string})=>request('/usuarios',{method:'POST',body:JSON.stringify({usuario:{nome:data.nome,cpf:data.cpf.replace(/\D/g,''),email:data.email,telefone:data.telefone,dataNascimento:data.dataNascimento},perfil:{perfil:data.perfil,matricula:data.matricula,cargo:data.perfil==='FUNCIONARIO'?'Funcionário':'Administrador'},senha:data.senha})}),
+  createUser:(data:{nome:string;cpf:string;email:string;telefone:string;dataNascimento:string;senha:string;perfil:string;matricula?:string;unidade?:string;trocaSenhaObrigatoria?:boolean})=>request('/usuarios',{method:'POST',body:JSON.stringify({usuario:{nome:data.nome,cpf:data.cpf.replace(/\D/g,''),email:data.email,telefone:data.telefone,dataNascimento:data.dataNascimento,unidade:data.unidade,trocaSenhaObrigatoria:data.trocaSenhaObrigatoria},perfil:{perfil:data.perfil,matricula:data.matricula,cargo:data.perfil==='FUNCIONARIO'?'Funcionário':'Administrador'},senha:data.senha})}),
   report:(inicio:string,fim:string)=>request<ManagementReport>(`/admin/relatorio?inicio=${inicio}&fim=${fim}`),
+  schedule:()=>request<Array<{id:number;unidade:string;diaSemana:number;horaAbertura:string;horaFechamento:string;intervaloMinutos:number;ativo:boolean}>>('/admin/horarios'),
+  saveSchedule:(data:Record<string,unknown>)=>request('/admin/horarios',{method:'POST',body:JSON.stringify(data)}),
+  blocks:()=>request<Array<{id:number;unidade:string;dataBloqueio:string;horaInicio:string|null;horaFim:string|null;motivo:string}>>('/admin/bloqueios'),
+  saveBlock:(data:Record<string,unknown>)=>request('/admin/bloqueios',{method:'POST',body:JSON.stringify(data)}),
 };
 
 export function roleFromUser(user: AuthenticatedUser): UserRole {

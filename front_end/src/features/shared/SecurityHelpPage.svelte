@@ -5,12 +5,14 @@
   import FormField from '../../design-system/components/FormField.svelte';
   import PageHeader from '../../design-system/components/PageHeader.svelte';
   import Toast from '../../design-system/components/Toast.svelte';
+  import {authApi} from '../../lib/api';
 
   let { mode }: { mode: 'security' | 'help' } = $props();
   let toast = $state('');
   let twoFactor = $state(false);
   let question = $state('');
   let answer = $state('');
+  let currentPassword=$state(''),newPassword=$state('');
   const faqs = [
     [
       'Como reagendar uma vacina?',
@@ -40,13 +42,13 @@
         <h2>Alterar senha</h2>
         <p>Use uma senha exclusiva com pelo menos oito caracteres.</p>
         <form
-          onsubmit={(e) => {
+          onsubmit={async (e) => {
             e.preventDefault();
-            toast = 'Senha atualizada com sucesso.';
+            try{await authApi.changePassword(currentPassword,newPassword);toast='Senha atualizada com sucesso.';currentPassword='';newPassword='';}catch(exception){toast=exception instanceof Error?exception.message:'Não foi possível alterar a senha.';}
           }}
         >
-          <FormField id="current-password" label="Senha atual" type="password" />
-          <FormField id="new-security-password" label="Nova senha" type="password" hint="Mínimo de 8 caracteres." />
+          <FormField id="current-password" label="Senha atual" type="password" value={currentPassword} oninput={v=>currentPassword=v}/>
+          <FormField id="new-security-password" label="Nova senha" type="password" hint="Mínimo de 8 caracteres." value={newPassword} oninput={v=>newPassword=v}/>
           <Button type="submit">Atualizar senha</Button>
         </form>
       </Card>

@@ -20,6 +20,7 @@ export const pagePaths: Record<string, string> = {
   'admin-vaccines': '/admin/vacinas',
   'admin-stock': '/admin/estoque',
   'admin-insurance': '/admin/convenios',
+  'admin-schedule': '/admin/funcionamento',
   'admin-reports': '/admin/relatorios',
   'admin-audit': '/admin/auditoria',
   'not-found': '/404',
@@ -29,7 +30,7 @@ export const pagePaths: Record<string, string> = {
 export const renderedPageIds = [
   'home', 'appointments', 'booking', 'vaccines', 'history', 'family', 'profile', 'insurance',
   'security', 'help', 'staff-dashboard', 'staff-agenda', 'staff-patients', 'staff-application',
-  'admin-dashboard', 'admin-users', 'admin-vaccines', 'admin-stock', 'admin-insurance',
+  'admin-dashboard', 'admin-users', 'admin-vaccines', 'admin-stock', 'admin-insurance', 'admin-schedule',
   'admin-reports', 'admin-audit', 'not-found', 'access-denied'
 ] as const;
 

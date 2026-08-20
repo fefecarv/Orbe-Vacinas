@@ -14,7 +14,7 @@
   let toast = $state('');
   type AppointmentView = {
     id: string; vaccine: string; manufacturer: string; date: string; time: string;
-    location: string; dose: string; status: 'confirmed' | 'pending' | 'completed' | 'cancelled';
+    location: string; dose: string; status: 'confirmed' | 'pending' | 'completed' | 'cancelled' | 'missed';
     manageable: boolean;
     cancellationReason?: string;
   };
@@ -33,8 +33,9 @@
   function mapAppointment(item: ApiAppointment, vaccines: ApiVaccine[]): AppointmentView {
     const vaccine = vaccines.find((candidate) => candidate.id === item.vacinaId);
     const date = new Date(item.dataAgendamento);
+    const expired = date.getTime() < Date.now() && ['PENDENTE', 'CONFIRMADO'].includes(item.status);
     const statuses: Record<string, AppointmentView['status']> = {
-      CONFIRMADO: 'confirmed', PENDENTE: 'pending', CONCLUIDO: 'completed', CANCELADO: 'cancelled',
+      CONFIRMADO: 'confirmed', PENDENTE: 'pending', CONCLUIDO: 'completed', CANCELADO: 'cancelled', FALTOU: 'missed',
     };
     return {
       id: String(item.id), vaccine: vaccine?.nome ?? `Vacina #${item.vacinaId}`,
@@ -42,8 +43,8 @@
       date: date.toLocaleDateString('pt-BR', { dateStyle: 'long' }),
       time: date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       location: [item.unidade, item.sala].filter(Boolean).join(' · '), dose: item.dosePrevista,
-      status: statuses[item.status] ?? 'pending', cancellationReason: item.motivoCancelamento ?? undefined,
-      manageable: ['PENDENTE', 'CONFIRMADO'].includes(item.status),
+      status: expired ? 'missed' : (statuses[item.status] ?? 'pending'), cancellationReason: item.motivoCancelamento ?? undefined,
+      manageable: !expired && ['PENDENTE', 'CONFIRMADO'].includes(item.status),
     };
   }
   async function loadAppointments() {

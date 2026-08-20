@@ -13,8 +13,8 @@
   }: { initialVaccine?: string; onFinish: () => void; onCancel: () => void } = $props();
   const user = currentUser();
   const currentPatient = { id: String(user?.id ?? ''), name: user?.nome ?? 'Titular', firstName: user?.nome.split(' ')[0] ?? 'Paciente' };
-  type VaccineOption = { id:string; name:string; manufacturer:string; doses:string; price:number; available:boolean };
-  type DependentOption = { id:string; name:string; relationship:string; age:string };
+  type VaccineOption = { id:string; name:string; manufacturer:string; doses:string; price:number; available:boolean;minAge:number;maxAge:number|null };
+  type DependentOption = { id:string; name:string; relationship:string; age:string;birthDate:string };
   type InsuranceOption = { id:string; company:string; plan:string; cardNumber:string; active:boolean };
   let vaccines = $state<VaccineOption[]>([]);
   let dependents = $state<DependentOption[]>([]);
@@ -24,6 +24,7 @@
   let vaccine = $state('');
   let date = $state(new Date(Date.now() + 86_400_000).toISOString().slice(0, 10));
   let time = $state('09:30');
+  let availableTimes = $state<string[]>([]);
   let insurance = $state('private');
   let done = $state(false);
   let loading = $state(true);
@@ -34,9 +35,11 @@
   let analyzing = $state(false);
   const steps = ['Paciente e vacina', 'Data e horário', 'Pagamento', 'Revisão'];
   let selectedVaccine = $derived(vaccines.find((v) => v.id === vaccine));
+  function eligibility(item:VaccineOption){const dependent=dependents.find(person=>person.id===patient);if(!dependent)return {ok:true,message:''};const birth=new Date(`${dependent.birthDate}T12:00:00`),now=new Date();const months=(now.getFullYear()-birth.getFullYear())*12+now.getMonth()-birth.getMonth();const ok=months>=item.minAge&&(item.maxAge===null||months<=item.maxAge);return {ok,message:ok?'':`Indicada a partir de ${item.minAge} meses${item.maxAge===null?'':` até ${item.maxAge} meses`}`};}
   let canContinue = $derived(
     step === 1 ? !!patient && !!vaccine : step === 2 ? !!date && !!time : step === 3 ? !!insurance : true,
   );
+  async function loadTimes(){time='';if(!date)return;try{availableTimes=await patientApi.availableTimes(date);if(availableTimes.length)time=availableTimes[0].slice(0,5);}catch(exception){availableTimes=[];error=exception instanceof Error?exception.message:'Não foi possível consultar os horários.';}}
   $effect(() => {
     if (!vaccine && initialVaccine) vaccine = initialVaccine;
   });
@@ -83,9 +86,9 @@
       const [apiVaccines, apiDependents, apiInsurances] = await Promise.all([
         patientApi.vaccines(), patientApi.dependents(), patientApi.insurances(),
       ]);
-      vaccines = apiVaccines.map((item) => ({ id:String(item.id), name:item.nome, manufacturer:item.fabricante, doses:item.esquemaDoses, price:item.valorBase, available:item.ativo }));
-      dependents = apiDependents.map((item) => ({ id:String(item.id), name:item.nome, relationship:'Dependente', age:new Date(item.dataNascimento).toLocaleDateString('pt-BR') }));
-      insurances = apiInsurances.map((item) => ({ id:String(item.id), company:item.nomeConvenio, plan:item.plano, cardNumber:item.numeroCarteirinha, active:item.ativo }));
+      vaccines = apiVaccines.map((item) => ({ id:String(item.id), name:item.nome, manufacturer:item.fabricante, doses:item.esquemaDoses, price:item.valorBase, available:item.ativo,minAge:item.idadeMinimaMeses??0,maxAge:item.idadeMaximaMeses??null }));
+      dependents = apiDependents.map((item) => ({ id:String(item.id), name:item.nome, relationship:'Dependente', age:new Date(item.dataNascimento).toLocaleDateString('pt-BR'),birthDate:item.dataNascimento }));
+      insurances = apiInsurances.map((item) => ({ id:String(item.id), company:item.nomeConvenio, plan:item.plano, cardNumber:item.numeroCarteirinha, active:item.ativo }));await loadTimes();
     } catch (exception) { error = exception instanceof Error ? exception.message : 'Não foi possível carregar os dados.'; }
     finally { loading = false; }
   });
@@ -162,9 +165,9 @@
           <Tooltip text="São exibidas somente vacinas disponíveis." />
         </div>
         <div class="vaccine-options">
-          {#each vaccines.filter((v) => v.available) as item}<label class:selected={vaccine === item.id}
-              ><input type="radio" bind:group={vaccine} value={item.id} /><span
-                ><strong>{item.name}</strong><small>{item.manufacturer} · {item.doses}</small></span
+          {#each vaccines.filter((v) => v.available) as item}{@const indication=eligibility(item)}<label class:selected={vaccine === item.id} class:unavailable={!indication.ok}
+              ><input type="radio" bind:group={vaccine} value={item.id} disabled={!indication.ok}/><span
+                ><strong>{item.name}</strong><small>{indication.ok?`${item.manufacturer} · ${item.doses}`:indication.message}</small></span
               ><b>{item.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</b></label
             >{/each}
         </div>
@@ -172,13 +175,13 @@
           <h2>Selecione a data e o horário</h2>
           <Tooltip text="Horários disponíveis na Unidade Centro." />
         </div>
-        <label class="date-label">Data<input type="date" bind:value={date} min={new Date().toISOString().slice(0, 10)} /></label>
+        <label class="date-label">Data<input type="date" bind:value={date} min={new Date().toISOString().slice(0, 10)} onchange={loadTimes} /></label>
         <div class="times">
-          {#each ['08:00', '08:30', '09:00', '09:30', '10:30', '11:00', '14:00', '14:30'] as item}<button
+          {#each availableTimes as raw}{@const item=raw.slice(0,5)}<button
               class:selected={time === item}
-              onclick={() => (time = item)}>{item}</button
-            >{/each}
+              onclick={() => (time = item)}>{item}</button>{/each}
         </div>
+        {#if availableTimes.length===0}<Alert>A clínica não possui horários disponíveis nesta data. Escolha outro dia.</Alert>{/if}
         <Alert>Chegue com 10 minutos de antecedência e leve um documento com foto.</Alert>
       {:else if step === 3}<div class="section-title">
           <h2>Como será o atendimento?</h2>
@@ -337,6 +340,7 @@
     border-color: var(--color-brand-500);
     box-shadow: 0 0 0 2px var(--focus-ring);
   }
+  .vaccine-options label.unavailable{opacity:.55;cursor:not-allowed}.vaccine-options label.unavailable small{color:var(--status-danger)}
   label input[type='radio'] {
     position: absolute;
     opacity: 0;

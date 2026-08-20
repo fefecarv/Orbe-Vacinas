@@ -75,6 +75,7 @@
         { id: 'admin-vaccines', icon: '✚', label: 'Vacinas' },
         { id: 'admin-stock', icon: '▤', label: 'Estoque e lotes' },
         { id: 'admin-insurance', icon: '◇', label: 'Convênios' },
+        { id: 'admin-schedule', icon: '◷', label: 'Funcionamento' },
       ],
     },
     {
