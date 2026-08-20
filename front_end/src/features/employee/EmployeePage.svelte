@@ -9,17 +9,43 @@
   import CollectionPanel from '../../design-system/components/CollectionPanel.svelte';
   import ViewModeToggle from '../../design-system/components/ViewModeToggle.svelte';
   import PatientDialog from './PatientDialog.svelte';
-  import type { QueueStatus } from '../../mocks/employee';
-  import { currentUser, staffApi, type ApiBatch, type RegisteredApplication, type StaffPatient, type StaffPatientInput } from '../../lib/api';
+  import StatusBadge from '../../design-system/components/StatusBadge.svelte';
+  import { canAdvanceStatus, localDateValue, mapEmployeeStatus, type QueueStatus } from './employeeLogic';
+  import {
+    currentUser,
+    staffApi,
+    type ApiBatch,
+    type ApiApplication,
+    type ApiVaccine,
+    type RegisteredApplication,
+    type StaffPatient,
+    type StaffPatientInput,
+  } from '../../lib/api';
   let {
     mode,
     onNavigate,
   }: { mode: 'dashboard' | 'agenda' | 'patients' | 'application'; onNavigate: (page: string) => void } = $props();
-  type DailyAppointment = { id:string; time:string; patient:string; cpf:string; vaccine:string; vaccineId:number; usuarioId:number|null; dependenteId:number|null; dose:string; room:string; status:QueueStatus; tipoAtendimento:'PARTICULAR'|'CONVENIO'|'CAMPANHA' };
+  type DailyAppointment = {
+    id: string;
+    time: string;
+    patient: string;
+    cpf: string;
+    vaccine: string;
+    vaccineId: number;
+    usuarioId: number | null;
+    dependenteId: number | null;
+    dose: string;
+    room: string;
+    status: QueueStatus;
+    tipoAtendimento: 'PARTICULAR' | 'CONVENIO' | 'CAMPANHA';
+  };
   let dailyAppointments = $state<DailyAppointment[]>([]);
   let statuses = $state<Record<string, QueueStatus>>({});
   let patients = $state<StaffPatient[]>([]);
   let query = $state('');
+  let agendaQuery = $state('');
+  let agendaStatus = $state('all');
+  let patientStatus = $state('all');
   let applied = $state(false);
   let selectedPatient = $state('');
   let selectedVaccine = $state('');
@@ -27,19 +53,34 @@
   let dose = $state('');
   let receipt = $state<RegisteredApplication | null>(null);
   let availableBatches = $state<ApiBatch[]>([]);
-  let applicationDate = $state(new Date().toISOString().slice(0, 10));
+  let availableVaccines = $state<ApiVaccine[]>([]);
+  let applicationMode = $state<'scheduled' | 'walkin'>(
+    sessionStorage.getItem('orbe-application-mode') === 'walkin' ? 'walkin' : 'scheduled',
+  );
+  let walkinPatient = $state('');
+  let walkinVaccine = $state('');
+  let walkinAttendance = $state<'PARTICULAR' | 'CAMPANHA'>('PARTICULAR');
+  let applicationDate = $state(localDateValue());
   let applicationTime = $state(new Date().toTimeString().slice(0, 5));
   let administrationRoute = $state('Intramuscular');
   let applicationSite = $state('Deltoide direito');
+  let observations = $state('');
+  let identityConfirmed = $state(false);
+  let screeningConfirmed = $state(false);
   let applicationError = $state('');
   let submittingApplication = $state(false);
   let patientDialog = $state(false);
   let editingPatient = $state<StaffPatient | null>(null);
+  let historyPatient = $state<StaffPatient | null>(null);
+  let patientHistory = $state<ApiApplication[]>([]);
+  let historyLoading = $state(false);
   let toast = $state('');
   let agendaLoading = $state(true);
   let agendaError = $state('');
   const staffUser = currentUser();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDateValue();
+  let agendaDate = $state(today);
+  const staffUnit = staffUser?.unidade || 'Orbe Centro';
   let agendaView = $state<'grid' | 'list'>(
     (localStorage.getItem('orbe-view-staff-agenda') as 'grid' | 'list') ?? 'list',
   );
@@ -53,11 +94,27 @@
     waiting: 'Na espera',
     in_service: 'Em atendimento',
     completed: 'Concluído',
+    canceled: 'Cancelado',
+    missed: 'Faltou',
   };
   let filteredPatients = $derived(
-    patients.filter((p) => p.nome.toLowerCase().includes(query.toLowerCase()) || p.cpf.includes(query)),
+    patients.filter(
+      (p) =>
+        (p.nome.toLowerCase().includes(query.toLowerCase()) || (p.cpf ?? '').includes(query.replace(/\D/g, ''))) &&
+        (patientStatus === 'all' || p.status === patientStatus),
+    ),
+  );
+  let filteredAgenda = $derived(
+    dailyAppointments.filter((item) => {
+      const matchesQuery =
+        item.patient.toLowerCase().includes(agendaQuery.toLowerCase()) ||
+        item.cpf.includes(agendaQuery.replace(/\D/g, ''));
+      return matchesQuery && (agendaStatus === 'all' || item.status === agendaStatus);
+    }),
   );
   let selectedClinicalAppointment = $derived(dailyAppointments.find((item) => item.id === selectedPatient));
+  let selectedWalkinPatient = $derived(patients.find((item) => item.id === walkinPatient));
+  let selectedWalkinVaccine = $derived(availableVaccines.find((item) => String(item.id) === walkinVaccine));
   let selectedBatch = $derived(availableBatches.find((item) => String(item.id) === batch));
   async function advance(id: string) {
     const order: QueueStatus[] = ['confirmed', 'waiting', 'in_service', 'completed'];
@@ -67,10 +124,12 @@
       onNavigate('staff-application');
       return;
     }
-    if (current < 3) {
+    if (current < 3 && canAdvanceStatus(statuses[id])) {
       const next = order[current + 1];
-      const apiStatuses: Partial<Record<QueueStatus, 'ESPERA'|'EM_ATENDIMENTO'|'CONCLUIDO'>> = {
-        waiting:'ESPERA', in_service:'EM_ATENDIMENTO', completed:'CONCLUIDO',
+      const apiStatuses: Partial<Record<QueueStatus, 'ESPERA' | 'EM_ATENDIMENTO' | 'CONCLUIDO'>> = {
+        waiting: 'ESPERA',
+        in_service: 'EM_ATENDIMENTO',
+        completed: 'CONCLUIDO',
       };
       const apiStatus = apiStatuses[next];
       if (!apiStatus) return;
@@ -83,34 +142,96 @@
       }
     }
   }
-  onMount(async () => {
+  async function loadAgenda() {
+    agendaLoading = true;
+    agendaError = '';
     try {
-      const [agenda, patientList] = await Promise.all([staffApi.dailyAgenda(today), staffApi.patients()]);
-      patients = patientList;
-      const statusMap: Record<string, QueueStatus> = { PENDENTE:'confirmed', CONFIRMADO:'confirmed', ESPERA:'waiting', EM_ATENDIMENTO:'in_service', CONCLUIDO:'completed' };
+      const agenda = await staffApi.dailyAgenda(agendaDate, staffUnit);
       dailyAppointments = agenda.map((item) => ({
-        id:String(item.id), time:new Date(item.dataAgendamento).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'}),
-        patient:item.paciente, cpf:item.cpf ? `***.***.***-${item.cpf.slice(-2)}` : 'Não informado',
-        vaccine:item.vacina, vaccineId:item.vacinaId, usuarioId:item.usuarioId, dependenteId:item.dependenteId,
-        dose:item.dose, room:item.sala || 'A confirmar', status:statusMap[item.status] ?? 'confirmed', tipoAtendimento:item.tipoAtendimento,
+        id: String(item.id),
+        time: new Date(item.dataAgendamento).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        patient: item.paciente,
+        cpf: item.cpf ? `***.***.***-${item.cpf.slice(-2)}` : 'Não informado',
+        vaccine: item.vacina,
+        vaccineId: item.vacinaId,
+        usuarioId: item.usuarioId,
+        dependenteId: item.dependenteId,
+        dose: item.dose,
+        room: item.sala || 'A confirmar',
+        status: mapEmployeeStatus(item.status),
+        tipoAtendimento: item.tipoAtendimento,
       }));
       statuses = Object.fromEntries(dailyAppointments.map((item) => [item.id, item.status]));
       const requested = sessionStorage.getItem('orbe-application-appointment');
-      const candidate = dailyAppointments.find((item) => item.id === requested)
-        ?? dailyAppointments.find((item) => item.status === 'in_service');
+      const candidate =
+        dailyAppointments.find((item) => item.id === requested) ??
+        dailyAppointments.find((item) => item.status === 'in_service');
       if (candidate) await selectApplicationAppointment(candidate.id);
-    } catch (exception) { agendaError = exception instanceof Error ? exception.message : 'Não foi possível carregar a agenda.'; }
-    finally { agendaLoading = false; }
+    } catch (exception) {
+      agendaError = exception instanceof Error ? exception.message : 'Não foi possível carregar a agenda.';
+    } finally {
+      agendaLoading = false;
+    }
+  }
+  async function changeAgendaDay(days: number) {
+    const date = new Date(`${agendaDate}T12:00:00`);
+    date.setDate(date.getDate() + days);
+    agendaDate = localDateValue(date);
+    await loadAgenda();
+  }
+  onMount(async () => {
+    await Promise.all([
+      loadAgenda(),
+      staffApi
+        .patients()
+        .then((items) => (patients = items))
+        .catch((exception) => {
+          toast = exception instanceof Error ? exception.message : 'Não foi possível carregar os pacientes.';
+        }),
+      staffApi
+        .vaccines()
+        .then((items) => (availableVaccines = items))
+        .catch(() => undefined),
+    ]);
   });
   async function selectApplicationAppointment(id: string) {
     selectedPatient = id;
-    const appointment = dailyAppointments.find((item) => item.id === id);
+    let appointment = dailyAppointments.find((item) => item.id === id);
+    if (appointment?.status === 'waiting') {
+      try {
+        await staffApi.updateAppointmentStatus(Number(id), 'EM_ATENDIMENTO');
+        statuses = { ...statuses, [id]: 'in_service' };
+        dailyAppointments = dailyAppointments.map((item) =>
+          item.id === id ? { ...item, status: 'in_service' } : item,
+        );
+        appointment = dailyAppointments.find((item) => item.id === id);
+        toast = 'Atendimento iniciado. Confira os dados antes de registrar a aplicação.';
+      } catch (exception) {
+        applicationError = exception instanceof Error ? exception.message : 'Não foi possível iniciar o atendimento.';
+        return;
+      }
+    }
     selectedVaccine = appointment ? String(appointment.vaccineId) : '';
     dose = appointment?.dose ?? '';
     batch = '';
     applicationError = '';
     try {
       availableBatches = appointment ? await staffApi.batches(appointment.vaccineId) : [];
+      batch = availableBatches[0] ? String(availableBatches[0].id) : '';
+    } catch (exception) {
+      availableBatches = [];
+      applicationError = exception instanceof Error ? exception.message : 'Não foi possível carregar os lotes.';
+    }
+  }
+  async function selectWalkinVaccine(id: string) {
+    walkinVaccine = id;
+    batch = '';
+    applicationError = '';
+    const vaccine = availableVaccines.find((item) => String(item.id) === id);
+    dose = vaccine?.numeroDoses === 1 ? 'Dose única' : '1ª dose';
+    try {
+      availableBatches = id ? await staffApi.batches(Number(id)) : [];
+      batch = availableBatches[0] ? String(availableBatches[0].id) : '';
     } catch (exception) {
       availableBatches = [];
       applicationError = exception instanceof Error ? exception.message : 'Não foi possível carregar os lotes.';
@@ -118,29 +239,62 @@
   }
   async function submit(e: SubmitEvent) {
     e.preventDefault();
-    const appointment = dailyAppointments.find((item) => item.id === selectedPatient);
-    if (!appointment || !batch || !dose || !staffUser) return;
-    submittingApplication = true; applicationError = '';
+    const appointment =
+      applicationMode === 'scheduled' ? dailyAppointments.find((item) => item.id === selectedPatient) : undefined;
+    const patient = applicationMode === 'walkin' ? patients.find((item) => item.id === walkinPatient) : undefined;
+    if ((!appointment && !patient) || !batch || !dose || !staffUser || !identityConfirmed || !screeningConfirmed) {
+      applicationError = 'Confirme a identidade do paciente e a triagem pré-vacinal.';
+      return;
+    }
+    submittingApplication = true;
+    applicationError = '';
     try {
       receipt = await staffApi.registerApplication({
-        agendamentoId:Number(appointment.id), usuarioId:appointment.usuarioId,
-        dependenteId:appointment.dependenteId, funcionarioId:staffUser.id,
-        loteId:Number(batch), dose, dataAplicacao:`${applicationDate}T${applicationTime}:00`,
-        tipoAtendimento:appointment.tipoAtendimento, viaAdministracao:administrationRoute,
-        localAplicacao:applicationSite, valorPago:null, observacoes:null,
+        agendamentoId: appointment ? Number(appointment.id) : null,
+        usuarioId: appointment?.usuarioId ?? (patient?.tipo === 'TITULAR' ? Number(patient.id.split(':')[1]) : null),
+        dependenteId:
+          appointment?.dependenteId ?? (patient?.tipo === 'DEPENDENTE' ? Number(patient.id.split(':')[1]) : null),
+        funcionarioId: staffUser.id,
+        loteId: Number(batch),
+        dose,
+        dataAplicacao: `${applicationDate}T${applicationTime}:00`,
+        tipoAtendimento: appointment?.tipoAtendimento ?? walkinAttendance,
+        viaAdministracao: administrationRoute,
+        localAplicacao: applicationSite,
+        valorPago: null,
+        observacoes: observations || null,
       });
-      applied = true; sessionStorage.removeItem('orbe-application-appointment');
-    } catch (exception) { applicationError = exception instanceof Error ? exception.message : 'Não foi possível registrar a aplicação.'; }
-    finally { submittingApplication = false; }
+      applied = true;
+      sessionStorage.removeItem('orbe-application-appointment');
+      sessionStorage.removeItem('orbe-application-mode');
+    } catch (exception) {
+      applicationError = exception instanceof Error ? exception.message : 'Não foi possível registrar a aplicação.';
+    } finally {
+      submittingApplication = false;
+    }
   }
   async function savePatient(patient: StaffPatientInput, id?: string) {
     try {
       const saved = await staffApi.savePatient(patient, id);
-      patients = id ? patients.map((item) => item.id === id ? saved : item) : [saved, ...patients];
-      patientDialog = false; editingPatient = null;
+      patients = id ? patients.map((item) => (item.id === id ? saved : item)) : [saved, ...patients];
+      patientDialog = false;
+      editingPatient = null;
       toast = id ? 'Paciente atualizado com sucesso.' : 'Paciente cadastrado com sucesso.';
     } catch (exception) {
       toast = exception instanceof Error ? exception.message : 'Não foi possível salvar o paciente.';
+    }
+  }
+  async function openPatientHistory(patient: StaffPatient) {
+    historyPatient = patient;
+    patientHistory = [];
+    historyLoading = true;
+    try {
+      patientHistory = await staffApi.patientHistory(patient.id);
+    } catch (exception) {
+      toast = exception instanceof Error ? exception.message : 'Não foi possível carregar o histórico.';
+      historyPatient = null;
+    } finally {
+      historyLoading = false;
     }
   }
 </script>
@@ -152,7 +306,7 @@
       description="Acompanhe a operação e os atendimentos de hoje."
     />
     <div class="stats">
-      {#each [{ n: String(dailyAppointments.length), l: 'Agendados hoje', c: '' }, { n: String(Object.values(statuses).filter(s=>s==='waiting').length), l: 'Na sala de espera', c: 'warning' }, { n: String(Object.values(statuses).filter(s=>s==='completed').length), l: 'Atendimentos concluídos', c: 'success' }] as item}<Card
+      {#each [{ n: String(dailyAppointments.filter((item) => !['canceled', 'missed'].includes(statuses[item.id])).length), l: 'Atendimentos hoje', c: '' }, { n: String(Object.values(statuses).filter((s) => s === 'waiting').length), l: 'Na sala de espera', c: 'warning' }, { n: String(Object.values(statuses).filter((s) => s === 'in_service').length), l: 'Em atendimento', c: '' }, { n: String(Object.values(statuses).filter((s) => s === 'completed').length), l: 'Concluídos', c: 'success' }] as item}<Card
           ><div class="stat {item.c}"><strong>{item.n}</strong><span>{item.l}</span></div></Card
         >{/each}
     </div>
@@ -161,18 +315,25 @@
         <div class="heading">
           <div>
             <h2>Próximos atendimentos</h2>
-            <p>Agenda da unidade Centro.</p>
+            <p>Agenda da unidade {staffUnit}.</p>
           </div>
           <button onclick={() => onNavigate('staff-agenda')}>Ver agenda completa</button>
         </div>
         <div class="queue">
           {#if agendaError}<Alert tone="danger">{agendaError}</Alert>{/if}
           {#if agendaLoading}<p>Carregando agenda...</p>{/if}
-          {#each dailyAppointments.slice(1, 5) as item}<article>
+          {#each dailyAppointments
+            .filter((item) => ['confirmed', 'waiting', 'in_service'].includes(statuses[item.id]))
+            .slice(0, 4) as item}<article>
               <time>{item.time}</time>
               <div><strong>{item.patient}</strong><small>{item.vaccine} · {item.dose}</small></div>
-              <span class={statuses[item.id]}>{labels[statuses[item.id]]}</span>
+              <StatusBadge status={statuses[item.id]} />
             </article>{/each}
+          {#if !agendaLoading && dailyAppointments.filter( (item) => ['confirmed', 'waiting', 'in_service'].includes(statuses[item.id]) ).length === 0}<p
+              class="empty"
+            >
+              Nenhum atendimento aguardando.
+            </p>{/if}
         </div>
       </section>
       <aside>
@@ -190,31 +351,40 @@
   {:else if mode === 'agenda'}<PageHeader
       eyebrow="Atendimentos"
       title="Agenda do dia"
-      description={`${new Date(`${today}T12:00:00`).toLocaleDateString('pt-BR', { dateStyle:'full' })} · Unidade Centro`}
-      >{#snippet actions()}<Button
-          variant="secondary"
-          onclick={() => (toast = 'Exibindo a agenda de 22 de julho de 2026.')}>Calendário</Button
-        ><Button onclick={() => onNavigate('staff-application')}>Novo encaixe</Button>{/snippet}</PageHeader
+      description={`${new Date(`${agendaDate}T12:00:00`).toLocaleDateString('pt-BR', { dateStyle: 'full' })} · ${staffUnit}`}
+      >{#snippet actions()}<Button variant="secondary" onclick={() => changeAgendaDay(-1)}>← Dia anterior</Button
+        ><Button variant="secondary" onclick={() => changeAgendaDay(1)}>Próximo dia →</Button><Button
+          onclick={() => {
+            sessionStorage.setItem('orbe-application-mode', 'walkin');
+            onNavigate('staff-application');
+          }}>Novo encaixe</Button
+        >{/snippet}</PageHeader
     >
     <div class="collection">
       <CollectionPanel title="Atendimentos do dia" description={`${dailyAppointments.length} horários na agenda`}>
         {#snippet actions()}<ViewModeToggle bind:value={agendaView} />{/snippet}
         <div class="toolbar">
-          <input placeholder="Buscar paciente" /><select
-            ><option>Todos os status</option><option>Confirmados</option><option>Na espera</option></select
+          <input type="date" bind:value={agendaDate} onchange={loadAgenda} aria-label="Data da agenda" />
+          <input placeholder="Buscar paciente ou CPF" bind:value={agendaQuery} />
+          <select bind:value={agendaStatus} aria-label="Filtrar por status"
+            ><option value="all">Todos os status</option><option value="confirmed">Confirmados</option><option
+              value="waiting">Na espera</option
+            ><option value="in_service">Em atendimento</option><option value="completed">Concluídos</option><option
+              value="canceled">Cancelados</option
+            ><option value="missed">Faltas</option></select
           >
         </div>
         <div class="agenda {agendaView}">
           {#if agendaError}<Alert tone="danger">{agendaError}</Alert>{/if}
           {#if agendaLoading}<p>Carregando agenda...</p>{/if}
-          {#each dailyAppointments as item}<article>
+          {#each filteredAgenda as item}<article>
               <time>{item.time}</time>
               <div class="patient"><strong>{item.patient}</strong><small>{item.cpf}</small></div>
               <div><strong>{item.vaccine}</strong><small>{item.dose} · {item.room}</small></div>
-              <span class={statuses[item.id]}>{labels[statuses[item.id]]}</span><Button
+              <StatusBadge status={statuses[item.id]} /><Button
                 size="sm"
                 variant={statuses[item.id] === 'completed' ? 'secondary' : 'primary'}
-                disabled={statuses[item.id] === 'completed'}
+                disabled={['completed', 'canceled', 'missed'].includes(statuses[item.id])}
                 onclick={() => advance(item.id)}
                 >{statuses[item.id] === 'confirmed'
                   ? 'Fazer check-in'
@@ -222,9 +392,16 @@
                     ? 'Iniciar'
                     : statuses[item.id] === 'in_service'
                       ? 'Registrar aplicação'
-                      : 'Concluído'}</Button
+                      : statuses[item.id] === 'canceled'
+                        ? 'Cancelado'
+                        : statuses[item.id] === 'missed'
+                          ? 'Não compareceu'
+                          : 'Concluído'}</Button
               >
             </article>{/each}
+          {#if !agendaLoading && filteredAgenda.length === 0}<p class="empty">
+              Nenhum atendimento encontrado para os filtros selecionados.
+            </p>{/if}
         </div></CollectionPanel
       >
     </div>
@@ -242,21 +419,44 @@
     <div class="collection">
       <CollectionPanel title="Pacientes cadastrados" description={`${filteredPatients.length} registros encontrados`}>
         {#snippet actions()}<ViewModeToggle bind:value={patientView} />{/snippet}
-        <div class="toolbar"><input placeholder="Buscar por nome ou CPF" bind:value={query} /></div>
+        <div class="toolbar">
+          <input placeholder="Buscar por nome ou CPF" bind:value={query} /><select bind:value={patientStatus}
+            ><option value="all">Todas as situações</option><option value="ATIVO">Ativos</option><option value="INATIVO"
+              >Inativos</option
+            ></select
+          >
+        </div>
         <div class="table {patientView}">
           <div class="tr head">
             <span>Paciente</span><span>CPF</span><span>Contato</span><span>Última vacina</span><span></span>
           </div>
           {#each filteredPatients as person}<div class="tr">
-              <span><strong>{person.nome}</strong><small>{person.tipo === 'DEPENDENTE' ? 'Dependente' : 'Titular'} · Nascimento: {new Date(`${person.dataNascimento}T12:00:00`).toLocaleDateString('pt-BR')}</small></span><span
-                >{person.cpf}</span
-              ><span>{person.telefone ?? 'Vinculado ao responsável'}</span><span>{person.status === 'ATIVO' ? 'Ativo' : 'Inativo'}</span><button
-                onclick={() => {
-                  editingPatient = person;
-                  patientDialog = true;
-                }}>Editar →</button
+              <span
+                ><strong>{person.nome}</strong><small
+                  >{person.tipo === 'DEPENDENTE' ? 'Dependente' : 'Titular'} · Nascimento: {new Date(
+                    `${person.dataNascimento}T12:00:00`,
+                  ).toLocaleDateString('pt-BR')}</small
+                ></span
+              ><span>{person.cpf ?? 'Não informado'}</span><span>{person.telefone ?? 'Vinculado ao responsável'}</span
+              ><span
+                ><strong>{person.ultimaVacina ?? 'Nenhuma aplicação'}</strong><small
+                  >{person.ultimaAplicacao
+                    ? new Date(`${person.ultimaAplicacao}T12:00:00`).toLocaleDateString('pt-BR')
+                    : person.status === 'ATIVO'
+                      ? 'Cadastro ativo'
+                      : 'Cadastro inativo'}</small
+                ></span
               >
+              <div class="row-actions">
+                <button onclick={() => openPatientHistory(person)}>Histórico</button><button
+                  onclick={() => {
+                    editingPatient = person;
+                    patientDialog = true;
+                  }}>Editar →</button
+                >
+              </div>
             </div>{/each}
+          {#if filteredPatients.length === 0}<p class="empty">Nenhum paciente encontrado.</p>{/if}
         </div></CollectionPanel
       >
     </div>
@@ -270,7 +470,7 @@
         ><Card
           ><div class="receipt">
             <p>Comprovante de aplicação</p>
-            <h2>{selectedClinicalAppointment?.vaccine}</h2>
+            <h2>{selectedClinicalAppointment?.vaccine ?? selectedWalkinVaccine?.nome}</h2>
             <dl>
               <div>
                 <dt>Protocolo</dt>
@@ -278,7 +478,7 @@
               </div>
               <div>
                 <dt>Paciente</dt>
-                <dd>{selectedClinicalAppointment?.patient}</dd>
+                <dd>{selectedClinicalAppointment?.patient ?? selectedWalkinPatient?.nome}</dd>
               </div>
               <div>
                 <dt>Dose e lote</dt>
@@ -306,75 +506,155 @@
               receipt = null;
               selectedPatient = '';
               selectedVaccine = '';
+              walkinPatient = '';
+              walkinVaccine = '';
               batch = '';
               dose = '';
+              identityConfirmed = false;
+              screeningConfirmed = false;
+              observations = '';
             }}>Registrar outra aplicação</Button
           >
         </div>
       </div>{:else}<form onsubmit={submit}>
-        <Card padding="lg"
+        <div class="mode-switch" role="group" aria-label="Origem da aplicação">
+          <button
+            type="button"
+            class:active={applicationMode === 'scheduled'}
+            onclick={() => (applicationMode = 'scheduled')}>Atendimento agendado</button
+          ><button
+            type="button"
+            class:active={applicationMode === 'walkin'}
+            onclick={() => (applicationMode = 'walkin')}>Encaixe</button
+          >
+        </div>
+        <Card padding="md"
           ><div class="form-title">
             <h2>Paciente e vacina</h2>
             <p>Todos os campos marcados são obrigatórios.</p>
           </div>
           <div class="form-grid">
+            {#if applicationMode === 'scheduled'}<label
+                >Atendimento<select
+                  bind:value={selectedPatient}
+                  onchange={() => selectApplicationAppointment(selectedPatient)}
+                  required
+                  ><option value="">Selecione</option
+                  >{#each dailyAppointments.filter((p) => ['waiting', 'in_service'].includes(p.status)) as p}<option
+                      value={p.id}>{p.time} · {p.patient} · {p.vaccine}</option
+                    >{/each}</select
+                ></label
+              ><label
+                >Vacina<select bind:value={selectedVaccine} disabled
+                  ><option value="">Selecione o atendimento</option>{#if selectedClinicalAppointment}<option
+                      value={String(selectedClinicalAppointment.vaccineId)}
+                      >{selectedClinicalAppointment.vaccine}</option
+                    >{/if}</select
+                ></label
+              >{:else}<label
+                >Paciente<select bind:value={walkinPatient} required
+                  ><option value="">Selecione</option
+                  >{#each patients.filter((person) => person.status === 'ATIVO') as person}<option value={person.id}
+                      >{person.nome} · {person.tipo === 'TITULAR' ? 'Titular' : 'Dependente'}</option
+                    >{/each}</select
+                ></label
+              ><label
+                >Vacina<select bind:value={walkinVaccine} onchange={() => selectWalkinVaccine(walkinVaccine)} required
+                  ><option value="">Selecione</option>{#each availableVaccines as vaccine}<option
+                      value={String(vaccine.id)}>{vaccine.nome} · {vaccine.fabricante}</option
+                    >{/each}</select
+                ></label
+              >{/if}
             <label
-              >Atendimento<select bind:value={selectedPatient} onchange={() => selectApplicationAppointment(selectedPatient)} required
-                ><option value="">Selecione</option>{#each dailyAppointments.filter((p) => p.status === 'in_service') as p}<option
-                    value={p.id}>{p.time} · {p.patient} · {p.vaccine}</option
+              >Lote<select bind:value={batch} required
+                ><option value="">Selecione</option>{#each availableBatches as item}<option value={String(item.id)}
+                    >{item.numeroLote} · Val. {new Date(`${item.dataValidade}T12:00:00`).toLocaleDateString('pt-BR')} · {item.quantidadeAtual}
+                    doses</option
                   >{/each}</select
               ></label
-            ><label
-              >Vacina<select bind:value={selectedVaccine} disabled required
-                ><option value="">Selecione o atendimento</option>{#if selectedClinicalAppointment}<option value={String(selectedClinicalAppointment.vaccineId)}>{selectedClinicalAppointment.vaccine}</option>{/if}</select
+            >
+            <label
+              >Dose<select bind:value={dose} disabled={applicationMode === 'scheduled'} required
+                ><option value="">Selecione</option>{#if applicationMode === 'scheduled' && dose}<option value={dose}
+                    >{dose}</option
+                  >{:else if selectedWalkinVaccine}{#if selectedWalkinVaccine.numeroDoses === 1}<option
+                      >Dose única</option
+                    >{:else}{#each Array.from({ length: selectedWalkinVaccine.numeroDoses }, (_, index) => `${index + 1}ª dose`) as option}<option
+                        >{option}</option
+                      >{/each}{/if}{/if}</select
               ></label
-            ><label
-              >Lote<select bind:value={batch} required
-                ><option value="">Selecione</option>{#each availableBatches as item}<option value={String(item.id)}>{item.numeroLote} · Val. {new Date(`${item.dataValidade}T12:00:00`).toLocaleDateString('pt-BR')} · {item.quantidadeAtual} doses</option>{/each}</select
-              ></label
-            ><FormField
-              id="dose"
-              label="Dose"
-              placeholder="Ex.: 2ª dose"
-              value={dose}
-              oninput={(v) => (dose = v)}
-              required
-            />
+            >
           </div></Card
-        ><Card padding="lg"
+        >
+        <Card padding="md"
           ><div class="form-title">
             <h2>Dados da aplicação</h2>
             <p>Informações que constarão na carteira vacinal.</p>
           </div>
           <div class="form-grid">
-            <FormField id="application-date" label="Data" type="date" value={applicationDate} oninput={(v) => (applicationDate = v)} /><FormField
+            <FormField
+              id="application-date"
+              label="Data"
+              type="date"
+              value={applicationDate}
+              oninput={(v) => (applicationDate = v)}
+            /><FormField
               id="application-time"
               label="Horário"
+              type="time"
               value={applicationTime}
               oninput={(v) => (applicationTime = v)}
-            /><label
-              >Tipo de atendimento<select
-                ><option>Agendado</option><option>Encaixe</option><option>Domiciliar</option></select
-              ></label
+            />{#if applicationMode === 'scheduled'}<label
+                >Cobertura<select disabled
+                  ><option
+                    >{selectedClinicalAppointment?.tipoAtendimento === 'CONVENIO'
+                      ? 'Convênio'
+                      : selectedClinicalAppointment?.tipoAtendimento === 'CAMPANHA'
+                        ? 'Campanha'
+                        : 'Particular'}</option
+                  ></select
+                ></label
+              >{:else}<label
+                >Cobertura<select bind:value={walkinAttendance}
+                  ><option value="PARTICULAR">Particular</option><option value="CAMPANHA">Campanha</option></select
+                ></label
+              >{/if}
             ><label
               >Via de administração<select bind:value={administrationRoute}
                 ><option>Intramuscular</option><option>Subcutânea</option><option>Oral</option></select
               ></label
-            ><FormField id="site" label="Local de aplicação" value={applicationSite} oninput={(v) => (applicationSite = v)} /><FormField
-              id="professional"
-              label="Profissional"
-              value={staffUser?.nome ?? ''}
-              disabled
-            />
+            ><FormField
+              id="site"
+              label="Local de aplicação"
+              value={applicationSite}
+              oninput={(v) => (applicationSite = v)}
+            /><FormField id="professional" label="Profissional" value={staffUser?.nome ?? ''} disabled />
+          </div>
+          <label class="observations"
+            >Observações clínicas<textarea
+              bind:value={observations}
+              maxlength="500"
+              placeholder="Registre orientações, intercorrências ou informações relevantes."></textarea></label
+          ></Card
+        >
+        <Card padding="md"
+          ><div class="checks">
+            <label
+              ><input type="checkbox" bind:checked={identityConfirmed} /> Identidade do paciente e responsável confirmadas</label
+            ><label
+              ><input type="checkbox" bind:checked={screeningConfirmed} /> Triagem pré-vacinal realizada, sem impedimentos
+              informados</label
+            >
           </div></Card
-        ><Alert tone="danger"
-          >Confira vacina, dose e lote antes de concluir. O registro clínico exigirá correção auditada após a
-          confirmação.</Alert
+        >
+        <Alert tone="info"
+          >Confira paciente, vacina, dose, lote e validade antes de concluir. O registro será permanente e auditado.</Alert
         >
         {#if applicationError}<Alert tone="danger">{applicationError}</Alert>{/if}
         <div class="submit">
-          <Button variant="secondary" onclick={() => onNavigate('staff-agenda')}>Cancelar</Button><Button type="submit" disabled={submittingApplication}
-            >{submittingApplication ? 'Registrando...' : 'Confirmar aplicação'}</Button
+          <Button variant="secondary" onclick={() => onNavigate('staff-agenda')}>Cancelar</Button><Button
+            type="submit"
+            disabled={submittingApplication}>{submittingApplication ? 'Registrando...' : 'Confirmar aplicação'}</Button
           >
         </div>
       </form>{/if}{/if}
@@ -388,6 +668,39 @@
       editingPatient = null;
     }}
   />{/if}
+{#if historyPatient}<div
+    class="history-backdrop"
+    role="presentation"
+    onclick={(event) => event.target === event.currentTarget && (historyPatient = null)}
+  >
+    <div class="history-dialog" role="dialog" aria-modal="true" aria-labelledby="history-title">
+      <header>
+        <div>
+          <p>Prontuário vacinal</p>
+          <h2 id="history-title">{historyPatient.nome}</h2>
+        </div>
+        <button aria-label="Fechar" onclick={() => (historyPatient = null)}>×</button>
+      </header>
+      {#if historyLoading}<p>Carregando histórico...</p>{:else if patientHistory.length === 0}<p class="empty">
+          Nenhuma aplicação registrada.
+        </p>{:else}<div class="history-list">
+          {#each patientHistory as item}<article>
+              <div><strong>{item.vacina}</strong><small>{item.fabricante} · {item.dose}</small></div>
+              <div>
+                <strong>{new Date(item.dataAplicacao).toLocaleDateString('pt-BR')}</strong><small
+                  >Lote {item.numeroLote}</small
+                >
+              </div>
+              <div><strong>{item.profissional}</strong><small>{item.localAplicacao}</small></div>
+            </article>{/each}
+        </div>{/if}
+      <footer>
+        <Button variant="secondary" onclick={() => window.print()}>Imprimir</Button><Button
+          onclick={() => (historyPatient = null)}>Fechar</Button
+        >
+      </footer>
+    </div>
+  </div>{/if}
 {#if toast}<Toast message={toast} onClose={() => (toast = '')} />{/if}
 
 <style>
@@ -476,29 +789,6 @@
   }
   small {
     color: var(--text-secondary);
-  }
-  .queue article > span,
-  .agenda article > span {
-    border-radius: var(--radius-pill);
-    padding: 0.3rem 0.6rem;
-    font-size: var(--text-xs);
-    font-weight: 750;
-  }
-  .confirmed {
-    background: var(--color-brand-50);
-    color: var(--color-brand-700);
-  }
-  .waiting {
-    background: var(--status-warning-bg);
-    color: var(--status-warning);
-  }
-  .in_service {
-    background: var(--surface-subtle);
-    color: var(--text-primary);
-  }
-  .completed {
-    background: var(--status-success-bg);
-    color: var(--status-success);
   }
   .dashboard-grid aside {
     display: flex;
@@ -611,6 +901,74 @@
     font-weight: 700;
     cursor: pointer;
   }
+  .row-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .history-backdrop {
+    position: fixed;
+    z-index: 90;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: var(--surface-overlay);
+    padding: var(--space-5);
+  }
+  .history-dialog {
+    width: min(100%, 52rem);
+    max-height: calc(100dvh - 2rem);
+    overflow: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-card);
+    padding: var(--space-5);
+    box-shadow: var(--shadow-md);
+  }
+  .history-dialog header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: var(--space-4);
+  }
+  .history-dialog header p {
+    color: var(--color-brand-500);
+    font-size: var(--text-xs);
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .history-dialog header button {
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 1.5rem;
+    cursor: pointer;
+  }
+  .history-list {
+    display: grid;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  .history-list article {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: var(--space-4);
+    padding: var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .history-list article:last-child {
+    border: 0;
+  }
+  .history-list article div {
+    display: grid;
+    gap: 0.2rem;
+  }
+  .history-dialog footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+  }
   .table.grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -640,7 +998,69 @@
     margin-top: var(--space-6);
   }
   .form-title {
-    margin-bottom: var(--space-6);
+    margin-bottom: var(--space-4);
+  }
+  .mode-switch {
+    display: flex;
+    width: max-content;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-card);
+    padding: 0.25rem;
+  }
+  .mode-switch button {
+    min-height: 2.25rem;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    padding: 0 var(--space-4);
+    color: var(--text-secondary);
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .mode-switch button.active {
+    background: var(--color-brand-50);
+    color: var(--color-brand-700);
+  }
+  .observations {
+    display: grid;
+    width: 100%;
+    gap: var(--space-2);
+    margin-top: var(--space-4);
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    font-weight: 650;
+  }
+  textarea {
+    width: 100%;
+    min-height: 5rem;
+    resize: vertical;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-card);
+    padding: var(--space-3);
+    color: var(--text-primary);
+    font: inherit;
+  }
+  .checks {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .checks label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    font-weight: 600;
+  }
+  .checks input {
+    width: 1.1rem;
+    min-height: 1.1rem;
+    accent-color: var(--color-brand-500);
+  }
+  .empty {
+    padding: var(--space-5);
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
   }
   .form-title h2 {
     font-size: var(--text-lg);
@@ -708,7 +1128,7 @@
     .agenda article {
       grid-template-columns: 3rem 1fr;
     }
-    .agenda article > span,
+    :global(.agenda article .badge),
     .agenda article > :global(button) {
       grid-column: 2;
     }

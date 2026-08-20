@@ -13,8 +13,14 @@
   let pendingAction = $state<'reschedule' | 'cancel' | 'details' | ''>('');
   let toast = $state('');
   type AppointmentView = {
-    id: string; vaccine: string; manufacturer: string; date: string; time: string;
-    location: string; dose: string; status: 'confirmed' | 'pending' | 'completed' | 'cancelled' | 'missed';
+    id: string;
+    vaccine: string;
+    manufacturer: string;
+    date: string;
+    time: string;
+    location: string;
+    dose: string;
+    status: 'confirmed' | 'pending' | 'waiting' | 'in_service' | 'completed' | 'cancelled' | 'missed';
     manageable: boolean;
     cancellationReason?: string;
   };
@@ -35,23 +41,33 @@
     const date = new Date(item.dataAgendamento);
     const expired = date.getTime() < Date.now() && ['PENDENTE', 'CONFIRMADO'].includes(item.status);
     const statuses: Record<string, AppointmentView['status']> = {
-      CONFIRMADO: 'confirmed', PENDENTE: 'pending', CONCLUIDO: 'completed', CANCELADO: 'cancelled', FALTOU: 'missed',
+      CONFIRMADO: 'confirmed',
+      PENDENTE: 'pending',
+      ESPERA: 'waiting',
+      EM_ATENDIMENTO: 'in_service',
+      CONCLUIDO: 'completed',
+      CANCELADO: 'cancelled',
+      FALTOU: 'missed',
     };
     return {
-      id: String(item.id), vaccine: vaccine?.nome ?? `Vacina #${item.vacinaId}`,
+      id: String(item.id),
+      vaccine: vaccine?.nome ?? `Vacina #${item.vacinaId}`,
       manufacturer: vaccine?.fabricante ?? 'Fabricante não informado',
       date: date.toLocaleDateString('pt-BR', { dateStyle: 'long' }),
       time: date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      location: [item.unidade, item.sala].filter(Boolean).join(' · '), dose: item.dosePrevista,
-      status: expired ? 'missed' : (statuses[item.status] ?? 'pending'), cancellationReason: item.motivoCancelamento ?? undefined,
+      location: [item.unidade, item.sala].filter(Boolean).join(' · '),
+      dose: item.dosePrevista,
+      status: expired ? 'missed' : (statuses[item.status] ?? 'pending'),
+      cancellationReason: item.motivoCancelamento ?? undefined,
       manageable: !expired && ['PENDENTE', 'CONFIRMADO'].includes(item.status),
     };
   }
-  async function loadAppointments() {
+  async function loadAppointments(silent = false) {
     const [kind, rawId] = selectedPatient.split(':');
     const patientId = Number(rawId);
     if (!patientId) return;
-    loading = true; loadError = '';
+    if (!silent) loading = true;
+    loadError = '';
     try {
       const [appointments, vaccines] = await Promise.all([
         kind === 'd' ? patientApi.appointmentsForDependent(patientId) : patientApi.appointments(patientId),
@@ -60,7 +76,9 @@
       items = appointments.map((item) => mapAppointment(item, vaccines));
     } catch (exception) {
       loadError = exception instanceof Error ? exception.message : 'Não foi possível carregar os agendamentos.';
-    } finally { loading = false; }
+    } finally {
+      if (!silent) loading = false;
+    }
   }
   async function confirmAction() {
     if (pendingAction === 'details') {
@@ -69,24 +87,35 @@
       return;
     }
     try {
-      if (pendingAction === 'cancel') await patientApi.cancelAppointment(Number(selectedAppointment), cancellationReason);
+      if (pendingAction === 'cancel')
+        await patientApi.cancelAppointment(Number(selectedAppointment), cancellationReason);
       else await patientApi.rescheduleAppointment(Number(selectedAppointment), `${newDate}T${newTime}:00`);
       await loadAppointments();
-      toast = pendingAction === 'cancel' ? 'Agendamento cancelado com sucesso.' : 'Agendamento atualizado para a nova data.';
+      toast =
+        pendingAction === 'cancel' ? 'Agendamento cancelado com sucesso.' : 'Agendamento atualizado para a nova data.';
     } catch (exception) {
       toast = exception instanceof Error ? exception.message : 'Não foi possível atualizar o agendamento.';
     }
     pendingAction = '';
     selectedAppointment = '';
   }
-  onMount(async () => {
-    try {
-      const dependents = await patientApi.dependents();
-      people = [people[0], ...dependents.map((item) => ({ id:`d:${item.id}`, name:item.nome }))];
-    } catch (exception) {
-      loadError = exception instanceof Error ? exception.message : 'Não foi possível carregar os dependentes.';
-    }
-    await loadAppointments();
+  onMount(() => {
+    void (async () => {
+      try {
+        const dependents = await patientApi.dependents();
+        people = [people[0], ...dependents.map((item) => ({ id: `d:${item.id}`, name: item.nome }))];
+      } catch (exception) {
+        loadError = exception instanceof Error ? exception.message : 'Não foi possível carregar os dependentes.';
+      }
+      await loadAppointments();
+    })();
+    const refresh = window.setInterval(() => void loadAppointments(true), 15_000);
+    const refreshOnFocus = () => void loadAppointments(true);
+    window.addEventListener('focus', refreshOnFocus);
+    return () => {
+      window.clearInterval(refresh);
+      window.removeEventListener('focus', refreshOnFocus);
+    };
   });
 </script>
 
@@ -100,7 +129,7 @@
     <Button onclick={onSchedule}>Agendar vacina</Button>
   </header>
   <label class="patient-pill"
-    >Carteira de <select bind:value={selectedPatient} onchange={loadAppointments}
+    >Carteira de <select bind:value={selectedPatient} onchange={() => loadAppointments()}
       >{#each people as person}<option value={person.id}>{person.name}</option>{/each}</select
     ></label
   >
@@ -155,7 +184,8 @@
                   >{/if}
               </div>
             </article></Card
-          >{/each}{#if !loading && items.length === 0}<Card><p>Nenhum agendamento encontrado para esta pessoa.</p></Card>{/if}
+          >{/each}{#if !loading && items.length === 0}<Card><p>Nenhum agendamento encontrado para esta pessoa.</p></Card
+          >{/if}
       </div>
     </CollectionPanel>
   </div>
@@ -354,8 +384,13 @@
     padding: 0 var(--space-3);
     color: var(--text-primary);
   }
-  .load-message { padding: var(--space-4); color: var(--text-secondary); }
-  .load-message.error { color: var(--status-danger); }
+  .load-message {
+    padding: var(--space-4);
+    color: var(--text-secondary);
+  }
+  .load-message.error {
+    color: var(--status-danger);
+  }
   @media (max-width: 1000px) {
     .list.grid {
       grid-template-columns: 1fr;
