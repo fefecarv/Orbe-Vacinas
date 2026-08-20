@@ -14,6 +14,11 @@ public class Vacina {
     private String esquemaDoses;
     private BigDecimal valorBase;
     private boolean ativo;
+    private int idadeMinimaMeses;
+    private Integer idadeMaximaMeses;
+    private int numeroDoses;
+    private Integer intervaloDias;
+    private Integer reforcoMeses;
     private LocalDateTime criadoEm;
     private LocalDateTime atualizadoEm;
 
@@ -38,6 +43,11 @@ public class Vacina {
     public void setValorBase(BigDecimal valorBase) { this.valorBase = valorBase; }
     public boolean isAtivo() { return ativo; }
     public void setAtivo(boolean ativo) { this.ativo = ativo; }
+    public int getIdadeMinimaMeses(){return idadeMinimaMeses;} public void setIdadeMinimaMeses(int v){idadeMinimaMeses=v;}
+    public Integer getIdadeMaximaMeses(){return idadeMaximaMeses;} public void setIdadeMaximaMeses(Integer v){idadeMaximaMeses=v;}
+    public int getNumeroDoses(){return numeroDoses;} public void setNumeroDoses(int v){numeroDoses=v;}
+    public Integer getIntervaloDias(){return intervaloDias;} public void setIntervaloDias(Integer v){intervaloDias=v;}
+    public Integer getReforcoMeses(){return reforcoMeses;} public void setReforcoMeses(Integer v){reforcoMeses=v;}
     public LocalDateTime getCriadoEm() { return criadoEm; }
     public void setCriadoEm(LocalDateTime criadoEm) { this.criadoEm = criadoEm; }
     public LocalDateTime getAtualizadoEm() { return atualizadoEm; }

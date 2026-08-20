@@ -77,6 +77,7 @@ public class LoteDaoJdbc extends AbstractJdbcDao implements LoteDao {
 
     @Override
     public List<Lote> listarTodos() {
+        try(var connection=connectionFactory.open();var statement=connection.prepareStatement("UPDATE lote SET status=CASE WHEN data_validade<CURRENT_DATE THEN 'VENCIDO' WHEN quantidade_atual<=0 THEN 'ESGOTADO' ELSE status END WHERE status<>'BLOQUEADO'")){statement.executeUpdate();}catch(SQLException exception){throw persistenceException(exception);}
         return consultar("SELECT " + COLUNAS + " FROM lote ORDER BY data_validade");
     }
 

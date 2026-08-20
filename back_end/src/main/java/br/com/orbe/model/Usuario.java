@@ -24,6 +24,8 @@ public class Usuario {
     private String estado;
     private StatusUsuario status;
     private boolean verificacaoDuasEtapas;
+    private boolean trocaSenhaObrigatoria;
+    private String unidade;
     private LocalDateTime ultimoAcessoEm;
     private String ultimoIp;
     private String tokenRecuperacaoHash;
@@ -67,6 +69,7 @@ public class Usuario {
     public void setStatus(StatusUsuario status) { this.status = status; }
     public boolean isVerificacaoDuasEtapas() { return verificacaoDuasEtapas; }
     public void setVerificacaoDuasEtapas(boolean verificacaoDuasEtapas) { this.verificacaoDuasEtapas = verificacaoDuasEtapas; }
+    public boolean isTrocaSenhaObrigatoria(){return trocaSenhaObrigatoria;}public void setTrocaSenhaObrigatoria(boolean v){trocaSenhaObrigatoria=v;}public String getUnidade(){return unidade;}public void setUnidade(String v){unidade=v;}
     public LocalDateTime getUltimoAcessoEm() { return ultimoAcessoEm; }
     public void setUltimoAcessoEm(LocalDateTime ultimoAcessoEm) { this.ultimoAcessoEm = ultimoAcessoEm; }
     public String getUltimoIp() { return ultimoIp; }

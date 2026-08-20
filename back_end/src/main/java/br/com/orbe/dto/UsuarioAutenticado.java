@@ -14,6 +14,7 @@ public class UsuarioAutenticado implements Serializable {
     private String email;
     private Set<PerfilUsuario> perfis;
     private String csrfToken;
+    private boolean trocaSenhaObrigatoria;
 
     public Long getId() {
         return id;
@@ -54,4 +55,5 @@ public class UsuarioAutenticado implements Serializable {
     public void setCsrfToken(String csrfToken) {
         this.csrfToken = csrfToken;
     }
+    public boolean isTrocaSenhaObrigatoria(){return trocaSenhaObrigatoria;}public void setTrocaSenhaObrigatoria(boolean v){trocaSenhaObrigatoria=v;}
 }

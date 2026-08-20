@@ -22,8 +22,8 @@ public class UsuarioCadastroDaoJdbc extends AbstractJdbcDao {
                 INSERT INTO usuario
                     (nome, cpf, email, senha_hash, telefone, data_nascimento,
                      cep, logradouro, numero, complemento, bairro, cidade, estado,
-                     status, verificacao_duas_etapas)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     status, verificacao_duas_etapas, troca_senha_obrigatoria, unidade)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
         String perfilSql = """
                 INSERT INTO usuario_perfil
@@ -86,5 +86,6 @@ public class UsuarioCadastroDaoJdbc extends AbstractJdbcDao {
         statement.setString(13, usuario.getEstado());
         statement.setString(14, usuario.getStatus().name());
         statement.setBoolean(15, usuario.isVerificacaoDuasEtapas());
+        statement.setBoolean(16,usuario.isTrocaSenhaObrigatoria());statement.setString(17,usuario.getUnidade());
     }
 }

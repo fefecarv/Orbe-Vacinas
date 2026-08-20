@@ -15,7 +15,8 @@ public class VacinaDaoJdbc extends AbstractJdbcDao implements VacinaDao {
 
     private static final String COLUNAS = """
             vacina_id, nome, fabricante, descricao, categoria, indicacao,
-            esquema_doses, valor_base, ativo, criado_em, atualizado_em
+            esquema_doses, valor_base, ativo, idade_minima_meses, idade_maxima_meses,
+            numero_doses, intervalo_dias, reforco_meses, criado_em, atualizado_em
             """;
 
     public VacinaDaoJdbc(ConnectionFactory connectionFactory) {
@@ -27,8 +28,8 @@ public class VacinaDaoJdbc extends AbstractJdbcDao implements VacinaDao {
         String sql = """
                 INSERT INTO vacina
                     (nome, fabricante, descricao, categoria, indicacao,
-                     esquema_doses, valor_base, ativo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     esquema_doses, valor_base, ativo, idade_minima_meses, idade_maxima_meses, numero_doses, intervalo_dias, reforco_meses)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """;
 
         try (var connection = connectionFactory.open();
@@ -47,14 +48,14 @@ public class VacinaDaoJdbc extends AbstractJdbcDao implements VacinaDao {
         String sql = """
                 UPDATE vacina
                    SET nome = ?, fabricante = ?, descricao = ?, categoria = ?,
-                       indicacao = ?, esquema_doses = ?, valor_base = ?, ativo = ?
+                       indicacao = ?, esquema_doses = ?, valor_base = ?, ativo = ?, idade_minima_meses=?, idade_maxima_meses=?, numero_doses=?, intervalo_dias=?, reforco_meses=?
                  WHERE vacina_id = ?
                 """;
 
         try (var connection = connectionFactory.open();
              var statement = connection.prepareStatement(sql)) {
             preencher(statement, vacina);
-            statement.setLong(9, vacina.getId());
+            statement.setLong(14, vacina.getId());
             statement.executeUpdate();
             return vacina;
         } catch (SQLException exception) {
@@ -88,7 +89,8 @@ public class VacinaDaoJdbc extends AbstractJdbcDao implements VacinaDao {
                 SELECT DISTINCT
                        v.vacina_id, v.nome, v.fabricante, v.descricao,
                        v.categoria, v.indicacao, v.esquema_doses,
-                       v.valor_base, v.ativo, v.criado_em, v.atualizado_em
+                       v.valor_base, v.ativo, v.idade_minima_meses, v.idade_maxima_meses,
+                       v.numero_doses, v.intervalo_dias, v.reforco_meses, v.criado_em, v.atualizado_em
                   FROM vacina v
                  WHERE v.ativo = TRUE
                    AND EXISTS (
@@ -139,6 +141,11 @@ public class VacinaDaoJdbc extends AbstractJdbcDao implements VacinaDao {
         statement.setString(6, vacina.getEsquemaDoses());
         statement.setBigDecimal(7, vacina.getValorBase());
         statement.setBoolean(8, vacina.isAtivo());
+        statement.setInt(9,vacina.getIdadeMinimaMeses());
+        if(vacina.getIdadeMaximaMeses()==null)statement.setNull(10,java.sql.Types.INTEGER);else statement.setInt(10,vacina.getIdadeMaximaMeses());
+        statement.setInt(11,vacina.getNumeroDoses());
+        if(vacina.getIntervaloDias()==null)statement.setNull(12,java.sql.Types.INTEGER);else statement.setInt(12,vacina.getIntervaloDias());
+        if(vacina.getReforcoMeses()==null)statement.setNull(13,java.sql.Types.INTEGER);else statement.setInt(13,vacina.getReforcoMeses());
     }
 
     private Vacina mapear(ResultSet resultSet) throws SQLException {
@@ -152,6 +159,7 @@ public class VacinaDaoJdbc extends AbstractJdbcDao implements VacinaDao {
         vacina.setEsquemaDoses(resultSet.getString("esquema_doses"));
         vacina.setValorBase(resultSet.getBigDecimal("valor_base"));
         vacina.setAtivo(resultSet.getBoolean("ativo"));
+        vacina.setIdadeMinimaMeses(resultSet.getInt("idade_minima_meses"));vacina.setIdadeMaximaMeses((Integer)resultSet.getObject("idade_maxima_meses"));vacina.setNumeroDoses(resultSet.getInt("numero_doses"));vacina.setIntervaloDias((Integer)resultSet.getObject("intervalo_dias"));vacina.setReforcoMeses((Integer)resultSet.getObject("reforco_meses"));
         Timestamp criado = resultSet.getTimestamp("criado_em");
         Timestamp atualizado = resultSet.getTimestamp("atualizado_em");
         vacina.setCriadoEm(criado == null ? null : criado.toLocalDateTime());
