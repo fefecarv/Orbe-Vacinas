@@ -10,8 +10,7 @@
   import ViewModeToggle from '../../design-system/components/ViewModeToggle.svelte';
   import PortalRecordDialog from './PortalRecordDialog.svelte';
   import { dependents as seedDependents, insurances as seedInsurances } from '../../mocks/portal';
-  import { currentPatient } from '../../mocks/patient';
-  import { patientApi } from '../../lib/api';
+  import { patientApi, type ApiUserProfile } from '../../lib/api';
 
   let { mode }: { mode: 'family' | 'insurance' | 'profile' } = $props();
   type Row = Record<string, string>;
@@ -40,6 +39,22 @@
   let cardView = $state<Row | null>(null);
   let loadError = $state('');
   let acceptedInsurances = $state<Row[]>([]);
+  let profile = $state<ApiUserProfile>({
+    id: 0,
+    nome: '',
+    cpf: '',
+    email: '',
+    telefone: '',
+    dataNascimento: '',
+    cep: '',
+    logradouro: '',
+    numero: '',
+    complemento: '',
+    bairro: '',
+    cidade: '',
+    estado: '',
+  });
+  let savingProfile = $state(false);
   let viewMode = $state<'grid' | 'list'>((localStorage.getItem('orbe-view-account') as 'grid' | 'list') ?? 'grid');
   const metadata = {
     family: {
@@ -78,6 +93,8 @@
         const [cards, accepted] = await Promise.all([patientApi.insurances(), patientApi.acceptedInsurances()]);
         acceptedInsurances = accepted.map((item) => ({id:String(item.id),label:`${item.nome} · ${item.plano}`}));
         insurance = cards.map((item) => ({id:String(item.id),convenioId:String(item.convenioId),company:item.nomeConvenio,plan:item.plano,cardNumber:item.numeroCarteirinha,holder:item.titular,validUntil:item.dataValidade,active:String(item.ativo)}));
+      } else if (mode === 'profile') {
+        profile = await patientApi.profile();
       }
     } catch (exception) {
       loadError = exception instanceof Error ? exception.message : 'Não foi possível carregar os dependentes.';
@@ -97,6 +114,19 @@
     toast = editing ? 'Registro atualizado com sucesso.' : 'Registro cadastrado com sucesso.';
     dialog = null;
     editing = null;
+  }
+
+  async function saveProfile() {
+    savingProfile = true;
+    loadError = '';
+    try {
+      profile = await patientApi.saveProfile(profile);
+      toast = 'Dados cadastrais salvos com sucesso.';
+    } catch (exception) {
+      loadError = exception instanceof Error ? exception.message : 'Não foi possível salvar seus dados.';
+    } finally {
+      savingProfile = false;
+    }
   }
 </script>
 
@@ -196,46 +226,47 @@
     </div>
   {:else}
     <form
-      onsubmit={(event) => {
+      onsubmit={async (event) => {
         event.preventDefault();
-        toast = 'Dados cadastrais salvos com sucesso.';
+        await saveProfile();
       }}
     >
       <Card padding="lg"
         ><h2>Informações pessoais</h2>
         <div class="form-grid">
-          <FormField id="profile-name" label="Nome completo" value={currentPatient.name} /><FormField
+          <FormField id="profile-name" label="Nome completo" value={profile.nome} oninput={(value) => (profile.nome = value)} required /><FormField
             id="profile-cpf"
             label="CPF"
-            value="123.456.789-27"
+            value={profile.cpf}
             disabled
-          /><FormField id="profile-birth" label="Data de nascimento" type="date" value="1990-05-18" /><FormField
+          /><FormField id="profile-birth" label="Data de nascimento" type="date" value={profile.dataNascimento} oninput={(value) => (profile.dataNascimento = value)} required /><FormField
             id="profile-phone"
             label="Telefone"
             type="tel"
-            value="(71) 99999-2211"
-          /><FormField id="profile-email" label="E-mail" type="email" value="mariana@exemplo.com" /><FormField
-            id="profile-responsible"
-            label="Nome do responsável"
-            placeholder="Quando aplicável"
-          />
+            value={profile.telefone}
+            oninput={(value) => (profile.telefone = value)}
+            required
+          /><FormField id="profile-email" label="E-mail" type="email" value={profile.email} oninput={(value) => (profile.email = value)} required />
         </div></Card
       >
       <Card padding="lg"
         ><h2>Endereço</h2>
         <div class="form-grid">
-          <FormField id="cep" label="CEP" value="40000-000" /><FormField
+          <FormField id="cep" label="CEP" value={profile.cep ?? ''} oninput={(value) => (profile.cep = value)} /><FormField
             id="street"
             label="Logradouro"
-            value="Avenida Oceânica"
-          /><FormField id="number" label="Número" value="120" /><FormField
+            value={profile.logradouro ?? ''}
+            oninput={(value) => (profile.logradouro = value)}
+          /><FormField id="number" label="Número" value={profile.numero ?? ''} oninput={(value) => (profile.numero = value)} /><FormField
             id="district"
             label="Bairro"
-            value="Barra"
-          /><FormField id="city" label="Cidade" value="Salvador" /><FormField id="state" label="Estado" value="Bahia" />
+            value={profile.bairro ?? ''}
+            oninput={(value) => (profile.bairro = value)}
+          /><FormField id="city" label="Cidade" value={profile.cidade ?? ''} oninput={(value) => (profile.cidade = value)} /><FormField id="state" label="Estado" value={profile.estado ?? ''} oninput={(value) => (profile.estado = value)} />
+          <FormField id="complement" label="Complemento" value={profile.complemento ?? ''} oninput={(value) => (profile.complemento = value)} />
         </div></Card
       >
-      <div class="save"><Button type="submit">Salvar alterações</Button></div>
+      <div class="save"><Button type="submit" disabled={savingProfile}>{savingProfile ? 'Salvando…' : 'Salvar alterações'}</Button></div>
     </form>
   {/if}
 </div>

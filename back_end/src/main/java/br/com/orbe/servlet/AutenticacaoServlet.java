@@ -4,7 +4,9 @@ import br.com.orbe.config.ApplicationContextListener;
 import br.com.orbe.dto.ApiResponse;
 import br.com.orbe.dto.LoginRequest;
 import br.com.orbe.dto.UsuarioAutenticado;
+import br.com.orbe.model.Usuario;
 import br.com.orbe.service.AutenticacaoService;
+import br.com.orbe.service.UsuarioService;
 import br.com.orbe.util.JsonUtil;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
@@ -21,11 +23,15 @@ public class AutenticacaoServlet extends BaseServlet {
     public static final String USUARIO_AUTENTICADO = "usuarioAutenticado";
 
     private AutenticacaoService service;
+    private UsuarioService usuarioService;
 
     @Override
     public void init() throws ServletException {
         service = (AutenticacaoService) getServletContext().getAttribute(
                 ApplicationContextListener.AUTENTICACAO_SERVICE
+        );
+        usuarioService = (UsuarioService) getServletContext().getAttribute(
+                ApplicationContextListener.USUARIO_SERVICE
         );
     }
 
@@ -39,7 +45,46 @@ public class AutenticacaoServlet extends BaseServlet {
             error(response, HttpServletResponse.SC_UNAUTHORIZED, "Sessao nao autenticada.");
             return;
         }
+        if ("perfil".equals(pathActionName(request))) {
+            json(response, HttpServletResponse.SC_OK,
+                    ApiResponse.ok(usuarioService.buscar(usuario.getId())));
+            return;
+        }
         json(response, HttpServletResponse.SC_OK, ApiResponse.ok(usuario));
+    }
+
+    @Override
+    protected void doPut(HttpServletRequest request, HttpServletResponse response)
+            throws IOException {
+        try {
+            if (!"perfil".equals(pathActionName(request))) {
+                error(response, HttpServletResponse.SC_NOT_FOUND,
+                        "Rota de autenticacao inexistente.");
+                return;
+            }
+            UsuarioAutenticado autenticado = usuarioDaSessao(request);
+            Usuario alteracoes = JsonUtil.mapper().readValue(request.getReader(), Usuario.class);
+            Usuario atual = usuarioService.buscar(autenticado.getId());
+
+            atual.setNome(alteracoes.getNome());
+            atual.setEmail(alteracoes.getEmail());
+            atual.setTelefone(alteracoes.getTelefone());
+            atual.setDataNascimento(alteracoes.getDataNascimento());
+            atual.setCep(alteracoes.getCep());
+            atual.setLogradouro(alteracoes.getLogradouro());
+            atual.setNumero(alteracoes.getNumero());
+            atual.setComplemento(alteracoes.getComplemento());
+            atual.setBairro(alteracoes.getBairro());
+            atual.setCidade(alteracoes.getCidade());
+            atual.setEstado(alteracoes.getEstado());
+
+            Usuario atualizado = usuarioService.atualizar(autenticado.getId(), atual);
+            autenticado.setNome(atualizado.getNome());
+            autenticado.setEmail(atualizado.getEmail());
+            json(response, HttpServletResponse.SC_OK, ApiResponse.ok(atualizado));
+        } catch (Exception exception) {
+            handleException(response, exception);
+        }
     }
 
     @Override

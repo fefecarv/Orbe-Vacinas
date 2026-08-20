@@ -27,6 +27,22 @@ export type PatientRegistration = {
   senha: string;
 };
 
+export type ApiUserProfile = {
+  id: number;
+  nome: string;
+  cpf: string;
+  email: string;
+  telefone: string;
+  dataNascimento: string;
+  cep: string | null;
+  logradouro: string | null;
+  numero: string | null;
+  complemento: string | null;
+  bairro: string | null;
+  cidade: string | null;
+  estado: string | null;
+};
+
 let csrfToken = '';
 let authenticatedUser: AuthenticatedUser | null = null;
 
@@ -260,6 +276,17 @@ export type StaffPatientInput = {
 };
 
 export const patientApi = {
+  profile() {
+    return request<ApiUserProfile>('/auth/perfil');
+  },
+
+  saveProfile(data: ApiUserProfile) {
+    return request<ApiUserProfile>('/auth/perfil', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
   vaccines() {
     return request<ApiVaccine[]>('/vacinas');
   },
