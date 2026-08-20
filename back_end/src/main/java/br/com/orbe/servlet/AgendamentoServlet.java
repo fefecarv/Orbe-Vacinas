@@ -1,7 +1,7 @@
 package br.com.orbe.servlet;
 
 import br.com.orbe.config.ApplicationContextListener;
-import br.com.orbe.controller.AgendamentoController;
+import br.com.orbe.dto.ApiResponse;
 import br.com.orbe.dto.CancelarAgendamentoRequest;
 import br.com.orbe.dto.CriarAgendamentoRequest;
 import br.com.orbe.dto.ReagendarAgendamentoRequest;
@@ -25,7 +25,6 @@ import java.time.format.DateTimeParseException;
 @WebServlet("/api/agendamentos/*")
 public class AgendamentoServlet extends BaseServlet {
 
-    private AgendamentoController controller;
     private AgendamentoService service;
     private AutorizacaoService autorizacaoService;
 
@@ -35,7 +34,6 @@ public class AgendamentoServlet extends BaseServlet {
                 ApplicationContextListener.AGENDAMENTO_SERVICE);
         autorizacaoService = (AutorizacaoService) getServletContext().getAttribute(
                 ApplicationContextListener.AUTORIZACAO_SERVICE);
-        controller = new AgendamentoController(service);
     }
 
     @Override
@@ -57,9 +55,14 @@ public class AgendamentoServlet extends BaseServlet {
             }
             String value = request.getParameter("data");
             if (value != null && !value.isBlank()) {
-                requireInternal(authenticated(request));
+                UsuarioAutenticado usuario = authenticated(request);
+                requireInternal(usuario);
+                String unidade = usuario.getPerfis().contains(PerfilUsuario.ADMINISTRADOR)
+                        ? request.getParameter("unidade")
+                        : usuario.getUnidade();
+                if (unidade == null || unidade.isBlank()) unidade = "Orbe Centro";
                 json(response, HttpServletResponse.SC_OK,
-                        controller.agendaDetalhada(LocalDate.parse(value)));
+                        ApiResponse.ok(service.listarAgendaDetalhada(LocalDate.parse(value), unidade)));
                 return;
             }
             Long usuarioId = optionalLongParameter(request, "usuarioId");
@@ -67,7 +70,7 @@ public class AgendamentoServlet extends BaseServlet {
             autorizacaoService.validarAgendamento(
                     authenticated(request), usuarioId, dependenteId);
             json(response, HttpServletResponse.SC_OK,
-                    controller.paciente(usuarioId, dependenteId));
+                    ApiResponse.ok(service.listarPaciente(usuarioId, dependenteId)));
         } catch (DateTimeParseException exception) {
             error(response, HttpServletResponse.SC_BAD_REQUEST,
                     "Use a data no formato AAAA-MM-DD.");
@@ -85,7 +88,8 @@ public class AgendamentoServlet extends BaseServlet {
             autorizacaoService.validarAgendamento(
                     authenticated(request), body.usuarioId(), body.dependenteId());
             autorizacaoService.validarConvenio(authenticated(request), body.convenioId());
-            json(response, HttpServletResponse.SC_CREATED, controller.criar(body));
+            json(response, HttpServletResponse.SC_CREATED,
+                    ApiResponse.criado("Agendamento criado.", service.criar(body)));
         } catch (Exception exception) {
             handleException(response, exception);
         }
@@ -96,7 +100,7 @@ public class AgendamentoServlet extends BaseServlet {
             throws IOException {
         try {
             Long id = requiredId(request);
-            Agendamento agendamento = controller.buscar(id);
+            Agendamento agendamento = service.buscar(id);
             autorizacaoService.validarAgendamento(authenticated(request),
                     agendamento.getUsuarioId(), agendamento.getDependenteId());
             if ("status".equalsIgnoreCase(pathAction(request))) {
@@ -104,7 +108,7 @@ public class AgendamentoServlet extends BaseServlet {
                 AtualizarStatusAgendamentoRequest body = JsonUtil.mapper().readValue(
                         request.getReader(), AtualizarStatusAgendamentoRequest.class);
                 json(response, HttpServletResponse.SC_OK,
-                        controller.atualizarStatus(id, body.getStatus()));
+                        ApiResponse.ok(service.atualizarStatus(id, body.getStatus())));
                 return;
             }
             if (!"reagendar".equalsIgnoreCase(pathAction(request))) {
@@ -113,7 +117,7 @@ public class AgendamentoServlet extends BaseServlet {
             ReagendarAgendamentoRequest body = JsonUtil.mapper().readValue(
                     request.getReader(), ReagendarAgendamentoRequest.class);
             json(response, HttpServletResponse.SC_OK,
-                    controller.reagendar(id, body.getNovaData()));
+                    ApiResponse.ok(service.reagendar(id, body.getNovaData())));
         } catch (Exception exception) {
             handleException(response, exception);
         }
@@ -124,13 +128,13 @@ public class AgendamentoServlet extends BaseServlet {
             throws IOException {
         try {
             Long id = requiredId(request);
-            Agendamento agendamento = controller.buscar(id);
+            Agendamento agendamento = service.buscar(id);
             autorizacaoService.validarAgendamento(authenticated(request),
                     agendamento.getUsuarioId(), agendamento.getDependenteId());
             CancelarAgendamentoRequest body = JsonUtil.mapper().readValue(
                     request.getReader(), CancelarAgendamentoRequest.class);
             json(response, HttpServletResponse.SC_OK,
-                    controller.cancelar(id, body.getMotivo()));
+                    ApiResponse.ok(service.cancelar(id, body.getMotivo())));
         } catch (Exception exception) {
             handleException(response, exception);
         }

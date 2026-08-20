@@ -1,7 +1,7 @@
 package br.com.orbe.servlet;
 
 import br.com.orbe.config.ApplicationContextListener;
-import br.com.orbe.controller.AplicacaoController;
+import br.com.orbe.dto.ApiResponse;
 import br.com.orbe.dto.RegistrarAplicacaoRequest;
 import br.com.orbe.exception.ForbiddenException;
 import br.com.orbe.service.AplicacaoService;
@@ -17,16 +17,15 @@ import java.io.IOException;
 @WebServlet("/api/aplicacoes/*")
 public class AplicacaoServlet extends BaseServlet {
 
-    private AplicacaoController controller;
+    private AplicacaoService service;
     private AutorizacaoService autorizacaoService;
 
     @Override
     public void init() throws ServletException {
-        AplicacaoService service = (AplicacaoService) getServletContext().getAttribute(
+        service = (AplicacaoService) getServletContext().getAttribute(
                 ApplicationContextListener.APLICACAO_SERVICE);
         autorizacaoService = (AutorizacaoService) getServletContext().getAttribute(
                 ApplicationContextListener.AUTORIZACAO_SERVICE);
-        controller = new AplicacaoController(service);
     }
 
     @Override
@@ -38,7 +37,7 @@ public class AplicacaoServlet extends BaseServlet {
             autorizacaoService.validarCarteira(
                     AutenticacaoServlet.usuarioDaSessao(request), usuarioId, dependenteId);
             json(response, HttpServletResponse.SC_OK,
-                    controller.carteira(usuarioId, dependenteId));
+                    ApiResponse.ok(service.listarCarteira(usuarioId, dependenteId)));
         } catch (Exception exception) {
             handleException(response, exception);
         }
@@ -55,7 +54,8 @@ public class AplicacaoServlet extends BaseServlet {
                 throw new ForbiddenException(
                         "O funcionario da aplicacao deve ser o usuario autenticado.");
             }
-            json(response, HttpServletResponse.SC_CREATED, controller.registrar(body));
+            json(response, HttpServletResponse.SC_CREATED,
+                    ApiResponse.criado("Aplicação registrada.", service.registrar(body)));
         } catch (Exception exception) {
             handleException(response, exception);
         }

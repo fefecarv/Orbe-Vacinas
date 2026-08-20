@@ -1,8 +1,8 @@
 package br.com.orbe.servlet;
 
 import br.com.orbe.config.ApplicationContextListener;
-import br.com.orbe.controller.UsuarioController;
 import br.com.orbe.dto.CadastroUsuarioRequest;
+import br.com.orbe.dto.ApiResponse;
 import br.com.orbe.model.Usuario;
 import br.com.orbe.model.UsuarioPerfil;
 import br.com.orbe.model.enums.PerfilUsuario;
@@ -20,14 +20,13 @@ import java.io.IOException;
 @WebServlet("/api/usuarios/*")
 public class UsuarioServlet extends BaseServlet {
 
-    private UsuarioController controller;
+    private UsuarioService service;
 
     @Override
     public void init() throws ServletException {
-        UsuarioService service = (UsuarioService) getServletContext().getAttribute(
+        service = (UsuarioService) getServletContext().getAttribute(
                 ApplicationContextListener.USUARIO_SERVICE
         );
-        controller = new UsuarioController(service);
     }
 
     @Override
@@ -36,7 +35,7 @@ public class UsuarioServlet extends BaseServlet {
         try {
             Long id = pathId(request);
             json(response, HttpServletResponse.SC_OK,
-                    id == null ? controller.listar() : controller.buscar(id));
+                    id == null ? ApiResponse.ok(service.listar()) : ApiResponse.ok(service.buscar(id)));
         } catch (Exception exception) {
             handleException(response, exception);
         }
@@ -67,7 +66,7 @@ public class UsuarioServlet extends BaseServlet {
             perfil.setAtivo(true);
 
             json(response, HttpServletResponse.SC_CREATED,
-                    controller.cadastrar(usuario, perfil));
+                    ApiResponse.criado("Usuário cadastrado.", service.cadastrar(usuario, perfil)));
         } catch (Exception exception) {
             handleException(response, exception);
         }
@@ -82,9 +81,9 @@ public class UsuarioServlet extends BaseServlet {
                 throw new IllegalArgumentException("Informe o usuario que sera atualizado.");
             }
             Usuario usuario = JsonUtil.mapper().readValue(request.getReader(), Usuario.class);
-            Usuario atual = controller.buscar(id).dados();
+            Usuario atual = service.buscar(id);
             usuario.setSenhaHash(atual.getSenhaHash());
-            json(response, HttpServletResponse.SC_OK, controller.atualizar(id, usuario));
+            json(response, HttpServletResponse.SC_OK, ApiResponse.ok(service.atualizar(id, usuario)));
         } catch (Exception exception) {
             handleException(response, exception);
         }

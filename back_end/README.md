@@ -10,7 +10,6 @@ Servlets Jakarta, JDBC, SQL manual, MySQL e empacotamento WAR para Tomcat 11.
 - `dao/jdbc`: implementações com SQL explícito, `PreparedStatement` e `ResultSet`;
 - `service`: regras de negócio e transações;
 - `servlet`: endpoints HTTP executados pelo Tomcat;
-- `controller`: camada opcional de orquestração, sem acesso direto ao banco;
 - `dto`: objetos de entrada e saída;
 - `config`: conexão e propriedades;
 - `exception`: erros de domínio e persistência;
@@ -49,7 +48,7 @@ uma senha real em arquivos `.env`, SQL ou no repositorio.
 
 Os models seguem o padrão JavaBeans, com atributos privados, construtor vazio, getters e setters. Os `record` são usados somente nos DTOs imutáveis.
 
-O fluxo obrigatório é:
+O fluxo da aplicação é:
 
 ```text
 Svelte -> Servlet -> Service -> DAO JDBC -> MySQL
