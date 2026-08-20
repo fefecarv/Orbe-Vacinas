@@ -27,7 +27,7 @@ public interface AgendamentoService {
 
     List<Agendamento> listarPaciente(Long usuarioId, Long dependenteId);
 
-    List<AgendaDiariaItem> listarAgendaDetalhada(LocalDate data);
+    List<AgendaDiariaItem> listarAgendaDetalhada(LocalDate data, String unidade);
 
     Agendamento atualizarStatus(Long id, StatusAgendamento status);
     List<LocalTime> horariosDisponiveis(LocalDate data, String unidade);

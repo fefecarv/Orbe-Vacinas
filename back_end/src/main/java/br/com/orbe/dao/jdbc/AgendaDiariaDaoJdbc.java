@@ -13,7 +13,8 @@ import java.util.List;
 public class AgendaDiariaDaoJdbc extends AbstractJdbcDao {
     public AgendaDiariaDaoJdbc(ConnectionFactory connectionFactory) { super(connectionFactory); }
 
-    public List<AgendaDiariaItem> listar(LocalDate data) {
+    public List<AgendaDiariaItem> listar(LocalDate data, String unidade) {
+        normalizarFaltas(unidade);
         String sql = """
                 SELECT a.agendamento_id, a.usuario_id, a.dependente_id,
                        COALESCE(u.nome, d.nome) AS paciente,
@@ -26,6 +27,7 @@ public class AgendaDiariaDaoJdbc extends AbstractJdbcDao {
                   JOIN vacina v ON v.vacina_id = a.vacina_id
                  WHERE a.data_agendamento >= ?
                    AND a.data_agendamento < ?
+                   AND a.unidade = ?
                  ORDER BY a.data_agendamento
                 """;
         List<AgendaDiariaItem> itens = new ArrayList<>();
@@ -33,6 +35,7 @@ public class AgendaDiariaDaoJdbc extends AbstractJdbcDao {
              var statement = connection.prepareStatement(sql)) {
             statement.setObject(1, data.atStartOfDay());
             statement.setObject(2, data.plusDays(1).atStartOfDay());
+            statement.setString(3, unidade);
             try (var resultSet = statement.executeQuery()) {
                 while (resultSet.next()) {
                     AgendaDiariaItem item = new AgendaDiariaItem();
@@ -52,6 +55,13 @@ public class AgendaDiariaDaoJdbc extends AbstractJdbcDao {
                 }
             }
             return itens;
+        } catch (SQLException exception) { throw persistenceException(exception); }
+    }
+
+    private void normalizarFaltas(String unidade) {
+        String sql = "UPDATE agendamento SET status='FALTOU' WHERE unidade=? AND status IN ('PENDENTE','CONFIRMADO') AND data_agendamento<CURRENT_TIMESTAMP";
+        try (var connection=connectionFactory.open(); var statement=connection.prepareStatement(sql)) {
+            statement.setString(1,unidade);statement.executeUpdate();
         } catch (SQLException exception) { throw persistenceException(exception); }
     }
 }

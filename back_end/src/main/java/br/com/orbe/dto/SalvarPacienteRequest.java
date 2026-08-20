@@ -13,6 +13,7 @@ public class SalvarPacienteRequest {
     private String status;
     private Long responsavelId;
     private String parentesco;
+    private String cep, logradouro, numero, complemento, bairro, cidade, estado;
 
     public String getTipo() { return tipo; }
     public void setTipo(String tipo) { this.tipo = tipo; }
@@ -34,4 +35,11 @@ public class SalvarPacienteRequest {
     public void setResponsavelId(Long responsavelId) { this.responsavelId = responsavelId; }
     public String getParentesco() { return parentesco; }
     public void setParentesco(String parentesco) { this.parentesco = parentesco; }
+    public String getCep(){return cep;} public void setCep(String v){cep=v;}
+    public String getLogradouro(){return logradouro;} public void setLogradouro(String v){logradouro=v;}
+    public String getNumero(){return numero;} public void setNumero(String v){numero=v;}
+    public String getComplemento(){return complemento;} public void setComplemento(String v){complemento=v;}
+    public String getBairro(){return bairro;} public void setBairro(String v){bairro=v;}
+    public String getCidade(){return cidade;} public void setCidade(String v){cidade=v;}
+    public String getEstado(){return estado;} public void setEstado(String v){estado=v;}
 }

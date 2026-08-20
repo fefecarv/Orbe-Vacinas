@@ -27,22 +27,31 @@ public class PacienteServiceImpl implements PacienteService {
             return localizar("D:"+pacienteDao.cadastrarDependente(request));
         }
         if(request.getEmail()==null||request.getEmail().isBlank())throw new BusinessException("O e-mail é obrigatório para o titular.");
-        Usuario usuario=new Usuario();usuario.setNome(request.getNome());usuario.setCpf(request.getCpf());usuario.setEmail(request.getEmail());usuario.setTelefone(request.getTelefone());usuario.setDataNascimento(request.getDataNascimento());usuario.setStatus(StatusUsuario.valueOf(request.getStatus()));usuario.setSenhaHash(PasswordHasher.hash(request.getSenhaTemporaria()));
+        if(request.getSenhaTemporaria()==null||request.getSenhaTemporaria().length()<8)throw new BusinessException("A senha temporária deve possuir pelo menos 8 caracteres.");
+        Usuario usuario=new Usuario();usuario.setNome(request.getNome());usuario.setCpf(request.getCpf());usuario.setEmail(request.getEmail());usuario.setTelefone(request.getTelefone());usuario.setDataNascimento(request.getDataNascimento());usuario.setCep(request.getCep());usuario.setLogradouro(request.getLogradouro());usuario.setNumero(request.getNumero());usuario.setComplemento(request.getComplemento());usuario.setBairro(request.getBairro());usuario.setCidade(request.getCidade());usuario.setEstado(request.getEstado());usuario.setStatus(StatusUsuario.ATIVO);usuario.setSenhaHash(PasswordHasher.hash(request.getSenhaTemporaria()));usuario.setTrocaSenhaObrigatoria(true);
         UsuarioPerfil perfil=new UsuarioPerfil();perfil.setPerfil(PerfilUsuario.PACIENTE);perfil.setAtivo(true);
         return localizar("U:"+usuarioService.cadastrar(usuario,perfil).getId());
     }
     @Override public PacienteResumo atualizar(String id,SalvarPacienteRequest request){
         validar(request);String[] parts=id.split(":");long numericId=Long.parseLong(parts[1]);
         if("D".equals(parts[0])){pacienteDao.atualizarDependente(numericId,request);return localizar(id);}
-        Usuario atual=usuarioService.buscar(numericId);atual.setNome(request.getNome());atual.setCpf(request.getCpf());atual.setTelefone(request.getTelefone());atual.setDataNascimento(request.getDataNascimento());atual.setStatus(StatusUsuario.valueOf(request.getStatus()));usuarioService.atualizar(numericId,atual);return localizar(id);
+        Usuario atual=usuarioService.buscar(numericId);atual.setNome(request.getNome());atual.setCpf(request.getCpf());atual.setTelefone(request.getTelefone());atual.setDataNascimento(request.getDataNascimento());if(request.getEmail()!=null&&!request.getEmail().isBlank())atual.setEmail(request.getEmail());atual.setCep(request.getCep());atual.setLogradouro(request.getLogradouro());atual.setNumero(request.getNumero());atual.setComplemento(request.getComplemento());atual.setBairro(request.getBairro());atual.setCidade(request.getCidade());atual.setEstado(request.getEstado());atual.setStatus(StatusUsuario.valueOf(request.getStatus()));usuarioService.atualizar(numericId,atual);return localizar(id);
     }
     private void validar(SalvarPacienteRequest request){
         if(request==null||request.getNome()==null||request.getNome().isBlank())throw new BusinessException("O nome é obrigatório.");
         request.setCpf(request.getCpf()==null?null:request.getCpf().replaceAll("\\D",""));
-        if(request.getCpf()==null||!request.getCpf().matches("\\d{11}"))throw new BusinessException("O CPF deve possuir 11 números.");
+        boolean titular="TITULAR".equals(request.getTipo());
+        if(titular&&(request.getCpf()==null||!request.getCpf().matches("\\d{11}")))throw new BusinessException("O CPF do titular deve possuir 11 números.");
+        if(!titular&&request.getCpf()!=null&&!request.getCpf().isBlank()&&!request.getCpf().matches("\\d{11}"))throw new BusinessException("O CPF do dependente deve possuir 11 números quando informado.");
+        if(!titular&&(request.getCpf()==null||request.getCpf().isBlank()))request.setCpf(null);
         if(request.getDataNascimento()==null||!request.getDataNascimento().isBefore(LocalDate.now()))throw new BusinessException("Informe uma data de nascimento válida.");
         if(!"TITULAR".equals(request.getTipo())&&!"DEPENDENTE".equals(request.getTipo()))throw new BusinessException("Tipo de paciente inválido.");
         if(request.getStatus()==null)request.setStatus("ATIVO");
+        if(!"ATIVO".equals(request.getStatus())&&!"INATIVO".equals(request.getStatus()))throw new BusinessException("Situação cadastral inválida.");
+        if(request.getCep()!=null&&!request.getCep().isBlank()&&!request.getCep().replaceAll("\\D","").matches("\\d{8}"))throw new BusinessException("O CEP deve possuir 8 números.");
+        if(request.getCep()!=null)request.setCep(request.getCep().replaceAll("\\D",""));
+        if(request.getEstado()!=null&&!request.getEstado().isBlank()&&!request.getEstado().matches("(?i)[A-Z]{2}"))throw new BusinessException("A UF deve possuir 2 letras.");
+        if(request.getEstado()!=null)request.setEstado(request.getEstado().toUpperCase());
     }
     private PacienteResumo localizar(String id){return pacienteDao.listar().stream().filter(item->id.equals(item.getId())).findFirst().orElseThrow();}
 }

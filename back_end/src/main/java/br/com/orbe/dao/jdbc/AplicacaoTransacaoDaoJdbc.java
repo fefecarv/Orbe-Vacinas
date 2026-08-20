@@ -25,6 +25,7 @@ public class AplicacaoTransacaoDaoJdbc extends AbstractJdbcDao {
             try {
                 validarFuncionario(connection, request.funcionarioId());
                 LoteBloqueado lote = bloquearLote(connection, request.loteId());
+                validarPacienteAvulso(connection, request, lote.vacinaId());
                 validarAgendamento(connection, request, lote.vacinaId());
 
                 Aplicacao aplicacao = inserirAplicacao(connection, request);
@@ -135,9 +136,9 @@ public class AplicacaoTransacaoDaoJdbc extends AbstractJdbcDao {
                         "data_agendamento",
                         LocalDateTime.class
                 );
-                if (request.dataAplicacao().isBefore(dataAgendamento)) {
+                if (!request.dataAplicacao().toLocalDate().equals(dataAgendamento.toLocalDate())) {
                     throw new BusinessException(
-                            "A aplicação não pode ser registrada antes do horário agendado."
+                            "A aplicação deve ser registrada na mesma data do atendimento."
                     );
                 }
                 Long usuarioId = nullableLong(resultSet, "usuario_id");
@@ -145,6 +146,28 @@ public class AplicacaoTransacaoDaoJdbc extends AbstractJdbcDao {
                 if (!java.util.Objects.equals(usuarioId, request.usuarioId())
                         || !java.util.Objects.equals(dependenteId, request.dependenteId())) {
                     throw new BusinessException("O paciente não corresponde ao agendamento.");
+                }
+            }
+        }
+    }
+
+    private void validarPacienteAvulso(Connection connection, RegistrarAplicacaoRequest request, Long vacinaId)
+            throws SQLException {
+        if (request.agendamentoId() != null) return;
+        String sql = request.usuarioId() != null
+                ? "SELECT u.status,TIMESTAMPDIFF(MONTH,u.data_nascimento,CURRENT_DATE) idade,v.idade_minima_meses,v.idade_maxima_meses FROM usuario u JOIN vacina v ON v.vacina_id=? WHERE u.usuario_id=?"
+                : "SELECT d.status,TIMESTAMPDIFF(MONTH,d.data_nascimento,CURRENT_DATE) idade,v.idade_minima_meses,v.idade_maxima_meses FROM dependente d JOIN vacina v ON v.vacina_id=? WHERE d.dependente_id=?";
+        try (var statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, vacinaId);
+            statement.setLong(2, request.usuarioId() != null ? request.usuarioId() : request.dependenteId());
+            try (var resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) throw new BusinessException("Paciente não encontrado.");
+                if (!"ATIVO".equals(resultSet.getString("status"))) throw new BusinessException("O paciente está inativo.");
+                int idade = resultSet.getInt("idade");
+                int minima = resultSet.getInt("idade_minima_meses");
+                Integer maxima = resultSet.getObject("idade_maxima_meses", Integer.class);
+                if (idade < minima || (maxima != null && idade > maxima)) {
+                    throw new BusinessException("Esta vacina não é indicada para a idade do paciente.");
                 }
             }
         }

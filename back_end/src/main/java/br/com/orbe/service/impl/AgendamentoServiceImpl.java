@@ -189,9 +189,10 @@ public class AgendamentoServiceImpl implements AgendamentoService {
     }
 
     @Override
-    public List<AgendaDiariaItem> listarAgendaDetalhada(LocalDate data) {
+    public List<AgendaDiariaItem> listarAgendaDetalhada(LocalDate data, String unidade) {
         if (data == null) throw new BusinessException("A data da agenda é obrigatória.");
-        return agendaDiariaDao.listar(data);
+        if (unidade == null || unidade.isBlank()) throw new BusinessException("A unidade da agenda é obrigatória.");
+        return agendaDiariaDao.listar(data, unidade);
     }
 
     @Override public List<java.time.LocalTime> horariosDisponiveis(LocalDate data,String unidade){if(data==null||data.isBefore(LocalDate.now()))return List.of();return configuracaoAgendaDao.horarios(data,unidade==null||unidade.isBlank()?"Orbe Centro":unidade).stream().filter(h->data.isAfter(LocalDate.now())||h.isAfter(java.time.LocalTime.now())).toList();}

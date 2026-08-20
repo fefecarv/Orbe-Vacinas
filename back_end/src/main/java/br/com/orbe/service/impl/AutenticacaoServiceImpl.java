@@ -59,6 +59,7 @@ public class AutenticacaoServiceImpl implements AutenticacaoService {
         autenticado.setEmail(usuario.getEmail());
         autenticado.setPerfis(Set.copyOf(perfis));
         autenticado.setTrocaSenhaObrigatoria(usuario.isTrocaSenhaObrigatoria());
+        autenticado.setUnidade(usuario.getUnidade());
         return autenticado;
     }
     @Override public void alterarSenha(Long id,String atual,String novaSenha){Usuario u=usuarioDao.buscarPorId(id).orElseThrow(this::credenciaisInvalidas);if(!PasswordHasher.matches(atual,u.getSenhaHash()))throw credenciaisInvalidas();u.setSenhaHash(PasswordHasher.hash(novaSenha));u.setTrocaSenhaObrigatoria(false);usuarioDao.atualizar(u);}
