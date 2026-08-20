@@ -86,7 +86,7 @@
     editIndex = index;
   }
   async function saveEntity(values: Row) {
-    if (!modalEntity) return;
+    if (!modalEntity) throw new Error('Não foi possível identificar o cadastro.');
     try {
       const rows=currentRows(modalEntity);const id=editIndex>=0?Number(rows[editIndex].id):undefined;
       if(modalEntity==='vaccine')await adminApi.saveVaccine({id,nome:values.name,fabricante:values.manufacturer,descricao:values.description,categoria:values.category,indicacao:`A partir de ${values.ageMin} meses`,esquemaDoses:`${values.doseCount} dose(s)${values.intervalDays?` a cada ${values.intervalDays} dias`:''}`,valorBase:Number(values.price),ativo:id?values.status==='Ativo':true,idadeMinimaMeses:Number(values.ageMin),idadeMaximaMeses:values.ageMax?Number(values.ageMax):null,numeroDoses:Number(values.doseCount),intervaloDias:values.intervalDays?Number(values.intervalDays):null,reforcoMeses:values.boosterMonths?Number(values.boosterMonths):null});
@@ -98,7 +98,11 @@
         await adminApi.createUser({nome:values.name,cpf:values.cpf,email:values.email,telefone:values.phone,dataNascimento:values.birth,senha:values.password,perfil:profiles[values.role],matricula:values.registration,unidade:values.unit,trocaSenhaObrigatoria:values.requirePasswordChange==='Sim'});
       }
       await loadAdminData();toast=editIndex>=0?'Registro atualizado com sucesso.':'Registro cadastrado com sucesso.';modalEntity=null;editIndex=-1;
-    } catch(exception){toast=exception instanceof Error?exception.message:'Não foi possível salvar o registro.';}
+    } catch(exception){
+      const message=exception instanceof Error?exception.message:'Não foi possível salvar o registro.';
+      toast=message;
+      throw new Error(message);
+    }
   }
   function reportRange() {
     return { end: new Date().toISOString().slice(0,10), start: new Date(Date.now()-(reportDays-1)*86_400_000).toISOString().slice(0,10) };

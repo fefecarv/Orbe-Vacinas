@@ -13,7 +13,7 @@
   }: {
     entity: Entity;
     initial?: Record<string, string>;
-    onSave: (values: Record<string, string>) => void;
+    onSave: (values: Record<string, string>) => Promise<void>;
     onCancel: () => void;
     vaccineOptions?: string[];
   } = $props();
@@ -66,22 +66,32 @@
       status: 'Ativo',
       unit: 'Unidade Centro',
       requirePasswordChange: 'Sim',
+      ...(entity === 'vaccine'
+        ? {
+            manufacturer: 'Sanofi Pasteur',
+            category: 'Infantil',
+            ageMin: '0',
+            doseCount: '1',
+            price: '0',
+          }
+        : {}),
       ...initial,
     })),
   );
   let error = $state('');
+  let saving = $state(false);
   let isUser = $derived(entity === 'user');
   let isStaff = $derived(values.role === 'Funcionário' || values.role === 'Administrador');
   let editing = $derived(Object.keys(initial).length > 0);
 
-  function submit(event: SubmitEvent) {
+  async function submit(event: SubmitEvent) {
     event.preventDefault();
     const required = isUser
       ? ['name', 'cpf', 'email', 'phone', 'birth', 'role', 'status', ...(editing ? [] : ['password'])]
       : configs[entity as Exclude<Entity, 'user'>].fields
           .filter((field) => !['status', 'discount', 'copay', 'ageMax', 'intervalDays', 'boosterMonths'].includes(field[0]))
           .map((field) => field[0]);
-    if (required.some((field) => !values[field]?.trim())) {
+    if (required.some((field) => !String(values[field] ?? '').trim())) {
       error = 'Preencha todos os campos obrigatórios.';
       return;
     }
@@ -89,7 +99,51 @@
       error = 'Informe um endereço de e-mail válido.';
       return;
     }
-    onSave({ ...values, lastAccess: values.lastAccess || 'Ainda não acessou' });
+    if (entity === 'vaccine') {
+      const ageMin = Number(values.ageMin);
+      const ageMax = values.ageMax ? Number(values.ageMax) : null;
+      const doseCount = Number(values.doseCount);
+      const intervalDays = values.intervalDays ? Number(values.intervalDays) : null;
+      const boosterMonths = values.boosterMonths ? Number(values.boosterMonths) : null;
+      const price = Number(values.price);
+      if (!Number.isInteger(ageMin) || ageMin < 0) {
+        error = 'A idade mínima deve ser um número inteiro igual ou maior que zero.';
+        return;
+      }
+      if (ageMax !== null && (!Number.isInteger(ageMax) || ageMax < ageMin)) {
+        error = 'A idade máxima deve ser igual ou maior que a idade mínima.';
+        return;
+      }
+      if (!Number.isInteger(doseCount) || doseCount < 1) {
+        error = 'A quantidade de doses deve ser igual ou maior que 1.';
+        return;
+      }
+      if (doseCount > 1 && (intervalDays === null || !Number.isInteger(intervalDays) || intervalDays < 1)) {
+        error = 'Informe um intervalo maior que zero para vacinas com mais de uma dose.';
+        return;
+      }
+      if (intervalDays !== null && (!Number.isInteger(intervalDays) || intervalDays < 1)) {
+        error = 'O intervalo entre doses deve ser maior que zero.';
+        return;
+      }
+      if (boosterMonths !== null && (!Number.isInteger(boosterMonths) || boosterMonths < 1)) {
+        error = 'O período de reforço deve ser maior que zero.';
+        return;
+      }
+      if (!Number.isFinite(price) || price < 0) {
+        error = 'O valor-base não pode ser negativo.';
+        return;
+      }
+    }
+    error = '';
+    saving = true;
+    try {
+      await onSave({ ...values, lastAccess: values.lastAccess || 'Ainda não acessou' });
+    } catch (exception) {
+      error = exception instanceof Error ? exception.message : 'Não foi possível salvar o registro.';
+    } finally {
+      saving = false;
+    }
   }
 </script>
 
@@ -250,7 +304,7 @@
               >{/if}
             {:else if field[2] === 'coverageType'}
               <label>{field[1]}<select value={values[field[0]] ?? 'ANALISE_MANUAL'} onchange={(e) => (values[field[0]] = e.currentTarget.value)}><option value="INTEGRAL">Cobertura integral</option><option value="PERCENTUAL">Desconto percentual</option><option value="COPARTICIPACAO">Coparticipação fixa</option><option value="SEM_COBERTURA">Sem cobertura</option><option value="ANALISE_MANUAL">Análise manual</option></select></label>
-            {:else if field[2] === 'category'}<label>{field[1]}<select bind:value={values[field[0]]}><option>Infantil</option><option>Adulto</option><option>Idoso</option><option>Gestante</option><option>Respiratória</option><option>Ocupacional</option><option>Viagem</option></select></label>
+            {:else if field[2] === 'category'}<label>{field[1]}<select bind:value={values[field[0]]}><option>Infantil</option><option>Adulto</option></select></label>
             {:else if field[2] === 'manufacturer'}<label>{field[1]}<select bind:value={values[field[0]]}><option>Sanofi Pasteur</option><option>Pfizer</option><option>GSK</option><option>Butantan</option><option>Fiocruz</option><option>Moderna</option></select></label>
             {:else if field[2] === 'vaccine'}<label>{field[1]}<select bind:value={values[field[0]]}><option value="">Selecione uma vacina</option>{#each vaccineOptions as option}<option>{option}</option>{/each}</select></label>
             {:else if ['number','optionalNumber','money','moneyOptional','percentage','date'].includes(field[2])}
@@ -270,7 +324,7 @@
 
       <footer>
         <Button variant="secondary" onclick={onCancel}>Cancelar</Button>
-        <Button type="submit">{editing ? 'Salvar alterações' : isUser ? 'Criar acesso' : 'Cadastrar'}</Button>
+        <Button type="submit" disabled={saving}>{saving ? 'Salvando…' : editing ? 'Salvar alterações' : isUser ? 'Criar acesso' : 'Cadastrar'}</Button>
       </footer>
     </form>
   </div>
