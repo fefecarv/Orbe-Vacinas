@@ -176,18 +176,22 @@
   }
   .hero-grid {
     display: grid;
-    grid-template-columns: 1.15fr 1fr 1fr;
+    width: min(100%, 78rem);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--space-4);
     margin-top: var(--space-8);
   }
   .hero {
-    display: flex;
-    min-height: 11.5rem;
-    flex-direction: column;
-    justify-content: space-between;
+    display: grid;
+    min-height: 0;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: var(--space-4);
+    row-gap: var(--space-2);
     overflow: hidden;
     border-radius: var(--radius-lg);
-    padding: var(--space-5);
+    padding: var(--space-4);
     box-shadow: var(--shadow-sm);
   }
   .hero.primary {
@@ -206,6 +210,8 @@
     display: grid;
     width: 2rem;
     height: 2rem;
+    grid-column: 1;
+    grid-row: 1 / -1;
     place-items: center;
     border: 1px solid currentColor;
     border-radius: var(--radius-md);
@@ -213,24 +219,38 @@
     opacity: 0.9;
   }
   .hero p {
+    grid-column: 2;
+    grid-row: 1;
     margin-bottom: var(--space-1);
     font-size: var(--text-xs);
     opacity: 0.78;
+    justify-self: start;
   }
   .hero h2 {
-    max-width: 15rem;
-    font-size: var(--text-lg);
+    grid-column: 2;
+    grid-row: 2;
+    max-width: none;
+    font-size: var(--text-md);
     line-height: 1.25;
+    white-space: nowrap;
+    justify-self: start;
   }
   .hero strong {
     display: block;
-    margin-top: var(--space-2);
+    grid-column: 3;
+    grid-row: 1;
+    margin: 0;
     font-size: var(--text-xs);
     line-height: 1.4;
     opacity: 0.82;
+    white-space: nowrap;
+    justify-self: end;
+    text-align: right;
   }
   .hero button {
-    align-self: flex-start;
+    grid-column: 3;
+    grid-row: 2;
+    justify-self: end;
     border: 0;
     border-bottom: 1px solid currentColor;
     background: transparent;
@@ -238,7 +258,11 @@
     color: inherit;
     font-size: var(--text-xs);
     font-weight: 750;
+    white-space: nowrap;
     cursor: pointer;
+  }
+  .hero > div {
+    display: contents;
   }
   .section {
     margin-top: var(--space-8);
@@ -346,13 +370,9 @@
     color: var(--color-brand-500);
     font-size: 1.35rem;
   }
-  @media (max-width: 1100px) {
+  @media (max-width: 1280px) {
     .hero-grid {
       grid-template-columns: repeat(2, 1fr);
-    }
-    .hero:last-child {
-      grid-column: 1 / -1;
-      min-height: 10rem;
     }
     .shortcut-grid {
       grid-template-columns: repeat(2, 1fr);
@@ -370,11 +390,23 @@
     .appointment-grid {
       grid-template-columns: 1fr;
     }
-    .hero:last-child {
-      grid-column: auto;
-    }
     .hero {
-      min-height: 11rem;
+      grid-template-columns: auto minmax(0, 1fr);
+      grid-template-rows: repeat(4, auto);
+      padding: var(--space-4);
+    }
+    .hero-icon {
+      grid-row: 1 / 3;
+      align-self: start;
+    }
+    .hero strong {
+      grid-column: 2;
+      grid-row: 3;
+      margin-top: var(--space-1);
+    }
+    .hero button {
+      grid-column: 2;
+      grid-row: 4;
     }
     .shortcut-grid {
       grid-template-columns: 1fr 1fr;
