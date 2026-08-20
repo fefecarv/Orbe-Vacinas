@@ -8,14 +8,12 @@
     activePage,
     onNavigate,
     onLogout,
-    onReset,
     role = 'patient',
   }: {
     children: Snippet;
     activePage: string;
     onNavigate: (page: string) => void;
     onLogout: () => void;
-    onReset?: () => void;
     role?: 'patient' | 'employee' | 'admin';
   } = $props();
   let menuOpen = $state(false);
@@ -130,9 +128,6 @@
         <option value="light">Claro</option>
         <option value="dark">Escuro</option>
       </select>
-      {#if role === 'admin'}<button class="logout reset" onclick={onReset}
-          ><span aria-hidden="true">↻</span> Restaurar demonstração</button
-        >{/if}
       <button class="logout" onclick={onLogout}><span aria-hidden="true">↪</span> Sair</button>
     </div>
   </aside>
@@ -253,10 +248,6 @@
   }
   .logout {
     color: var(--color-brand-500);
-  }
-  .reset {
-    color: var(--text-secondary);
-    font-size: var(--text-xs);
   }
   main {
     min-height: 100vh;

@@ -16,7 +16,6 @@
   import AdminSchedulePage from './features/admin/AdminSchedulePage.svelte';
   import PlaceholderPage from './features/shared/PlaceholderPage.svelte';
   import SecurityHelpPage from './features/shared/SecurityHelpPage.svelte';
-  import ConfirmDialog from './design-system/components/ConfirmDialog.svelte';
   import { isKnownPage, pageFromPath, pagePaths, pathAllowedForRole, roleFromPath, type UserRole } from './lib/navigation';
   import { authApi, roleFromUser, currentUser } from './lib/api';
   let activePage = $state(pageFromPath(location.pathname));
@@ -25,7 +24,6 @@
   let authPage = $state<'login' | 'register' | 'forgot'>(location.pathname === '/cadastro' ? 'register' : location.pathname === '/recuperar-senha' ? 'forgot' : 'login');
   let bookingVaccine = $state('');
   let role = $state<UserRole>((localStorage.getItem('orbe-session-role') as UserRole | null) ?? roleFromPath(location.pathname));
-  let resetDialog = $state(false);
   const titles: Record<string, string> = { vaccines:'Catálogo de vacinas', history:'Carteira vacinal', family:'Minha família', profile:'Dados cadastrais', insurance:'Meus convênios', security:'Segurança', help:'Central de ajuda' };
 
   function navigate(page: string, replace = false) {
@@ -54,16 +52,6 @@
     activePage = 'home';
     localStorage.removeItem('orbe-session-role');
     history.replaceState({}, '', '/login');
-  }
-
-  function resetDemo() {
-    const preservedTheme = localStorage.getItem('orbe-theme');
-    const preservedRole = localStorage.getItem('orbe-session-role');
-    Object.keys(localStorage).filter(key => key.startsWith('orbe-')).forEach(key => localStorage.removeItem(key));
-    if (preservedTheme) localStorage.setItem('orbe-theme', preservedTheme);
-    if (preservedRole) localStorage.setItem('orbe-session-role', preservedRole);
-    resetDialog = false;
-    location.reload();
   }
 
   onMount(() => {
@@ -98,7 +86,7 @@
 {#if authChecking}
   <div class="session-loading" role="status">Carregando...</div>
 {:else if authenticated}
-  <AppShell {activePage} {role} onNavigate={navigate} onLogout={logout} onReset={() => resetDialog = true}>
+  <AppShell {activePage} {role} onNavigate={navigate} onLogout={logout}>
     {#if activePage === 'home'}<PatientDashboard onNavigate={navigate} />
     {:else if activePage === 'appointments'}<AppointmentsPage onSchedule={() => { bookingVaccine = ''; navigate('booking'); }} />
     {:else if activePage === 'booking'}<BookingPage initialVaccine={bookingVaccine} onFinish={() => navigate('appointments')} onCancel={() => navigate('appointments')} />
@@ -125,7 +113,6 @@
     {:else if activePage === 'access-denied'}<PlaceholderPage title="Acesso não autorizado" description="Seu perfil não possui permissão para acessar esta área." onBack={() => navigate(role === 'admin' ? 'admin-dashboard' : role === 'employee' ? 'staff-dashboard' : 'home')} />
     {:else}<PlaceholderPage title={titles[activePage] ?? 'Orbe'} onBack={() => navigate(role === 'admin' ? 'admin-dashboard' : role === 'employee' ? 'staff-dashboard' : 'home')} />{/if}
   </AppShell>
-  {#if resetDialog}<ConfirmDialog title="Restaurar dados de demonstração?" description="Cadastros, aplicações, fila e alterações locais voltarão ao estado inicial. Tema e sessão serão preservados." confirmLabel="Restaurar dados" danger onConfirm={resetDemo} onCancel={() => resetDialog = false}/>{/if}
 {:else}
   <AuthLayout>
     {#if authPage === 'login'}
